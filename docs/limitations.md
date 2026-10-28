@@ -1,0 +1,16 @@
+# Limitations
+
+- Single-owner local hackathon implementation. Browser sessions protect the workspace but do not implement multi-tenant identities, enterprise SSO, roles or account recovery. Keep services on loopback for this demo.
+- Customer follow-ups are drafts. Owner approval records consent and an approved draft; no email, WhatsApp, SMS or external calendar delivery service is implemented. Messages sent by this app remain zero.
+- Booking creates a PostgreSQL site-visit record after consent and transactional checks. It does not invite a customer or create an external calendar event. Displayed slots remain provisional until the backend commits a booking.
+- The seed is a fixed fictional Bengaluru snapshot for 2–8 November 2026, with INR prices. Slots eventually expire; the seed is not a rolling scheduling service. A repeated seed preserves existing edits/bookings and does not reset availability.
+- A completed run certifies validated plan execution using saved tool evidence. It does not independently prove every interpretation of a natural-language business goal was fulfilled. Matching ranks deterministic exact criteria; it is not a valuation or lead-conversion prediction system.
+- The model can fail, produce invalid output or choose incomplete plans. Validation, limits and approval gates constrain execution but do not establish general prompt-injection immunity. Business records are treated as untrusted data; privileged decisions remain outside model tools.
+- Execution stays attached to the HTTP/CLI request. There is no durable background worker, automatic recovery, scheduler or websocket stream. Browser polling is every eight seconds. Sign-out does not cancel backend work already accepted. Recovery is explicit and bounded; inspect saved keys after unknown responses.
+- The dashboard shows up to 20 recent runs, 100 pending reviews and 200 steps; truncation is indicated. Each run has small execution budgets. This is not a scale or load-tested system.
+- Runtime currently uses configured PostgreSQL credentials. A public deployment requires appropriate restricted runtime privileges, HTTPS, production identity, monitoring, backups, hosting limits and proxy/origin review. Local session cookies are Secure only over HTTPS.
+- Relevant goals/business data are sent to Meta. store=false is requested, not a provider retention guarantee. No real customer data was used for seed/demo/testing. Do not share secrets, login URLs or session cookies in recordings or logs.
+- Five schema tests remain unexecuted because they require a separate empty disposable TEST_DATABASE_URL. Other business tool, agent, approval, concurrency and session tests were executed against isolated fixtures. Test evidence does not prove production reliability.
+- Tests mock external inference; live product demonstrations use the real configured Meta service. A stored demo is verified historical evidence, not a fresh model invocation. Explain this distinction during a presentation.
+
+No deployment, publication, remote push or hackathon submission has been performed. Submission rules, account eligibility, asset licensing and required materials must be checked against the event's official current requirements before submitting; this implementation phase does not claim those external requirements are verified.

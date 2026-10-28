@@ -1,0 +1,74 @@
+# Regression tests
+
+External model responses are mocked in automated tests. Business integration tests use real PostgreSQL transactions and fictional records, with outer rollback or exact UUID cleanup for independent-session races. No test approves the retained demo run or sends customer messages. The live model check remains a separate opt-in demonstration.
+
+## Coverage matrix
+
+| Required scenario | Executable evidence |
+| --- | --- |
+| Normal execution | `test_plan_then_tools_then_verified_finish`, `test_persisted_plan_steps_and_replay_without_new_model_call`, persisted dashboard browser test |
+| Malformed model output | `test_malformed_model_plan_persists_failure_without_business_writes`, argument validation and provider contract tests |
+| Unavailable appointments | `test_slot_taken_after_approval_is_refused`, `test_disabled_slot_after_approval_is_refused`, `test_elapsed_slot_is_neither_listed_nor_booked`, `test_property_withdrawal_after_consent_leaves_booking_uncommitted` |
+| Rejected owner consent | `test_rejected_run_resume_is_idempotent_and_never_calls_model`, `test_rejection_cancels_without_delivery`, explicit rejection component test |
+| Duplicate actions | `test_distinct_model_call_ids_replay_one_business_action`, `test_completed_request_key_cannot_change_goal_or_permissions`, independent-session booking replay and owner-decision races |
+| Database failure | `test_audit_failure_rolls_back_business_write`, `test_owner_audit_failure_rolls_back_consent_and_draft_status`, commit-failure and rollback-only retry tests, sanitized HTTP 503 tests |
+| Truthful reporting | `test_false_completion_cannot_replace_persisted_tool_evidence`, missing-count/failed-state UI tests, malformed decision acknowledgement tests |
+| Booking integrity | Independent-session double booking, consumed approval reuse, changed approval snapshots, slot locks and database guard tests |
+| Session/security boundary | Expiry/revocation/single-use ticket races, HttpOnly browser cookie, fixed BFF endpoint allowlist, same-origin mutation checks, model permission denial |
+
+Phase 9 adds 11 database regressions and 6 component cases. New malformed-acknowledgement tests reproduced a real UI problem: a 200 response without the requested approval ID and decision could dismiss the review as confirmed. The UI now checks both fields and retains the dialog and original retry key when confirmation is invalid. This does not change consent or booking rules.
+
+## Commands
+
+From backend:
+
+```powershell
+Set-Location 'D:\programing_tools\Meta Global AI Developer Hackathon\soloestate-ai-hackathon\backend'
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: **128 passed, 55 skipped**, plus an upstream Starlette/AnyIO deprecation warning; dependency check reports no broken requirements. Default tests do not opt into the configured application database.
+
+For all existing and new tool/agent/integrity database cases:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
+```
+
+Expected: **178 passed, 5 skipped** with configured Supabase access and migrations 0001–0003. Tests never use real model credits. The five original schema cases require a separate empty disposable TEST_DATABASE_URL and are excluded from application-database runs. Never point TEST_DATABASE_URL at the demo or production database; see [database.md](database.md).
+
+To run the same coverage in smaller groups:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_agent_database.py tests/test_integrity_database.py --run-agent-db-tests --run-integrity-db-tests
+.\.venv\Scripts\python.exe -m pytest -q tests/test_tools_database.py tests/test_dashboard_sessions.py --run-tool-db-tests --run-integrity-db-tests
+```
+
+From frontend:
+
+```powershell
+Set-Location 'D:\programing_tools\Meta Global AI Developer Hackathon\soloestate-ai-hackathon\frontend'
+npm test
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Expected: **38 frontend tests pass**, lint/typecheck exit zero and production build completes. Stop a running production frontend before rebuilding its output directory.
+
+For browser checks, start the backend as documented in [dashboard.md](dashboard.md), then run:
+
+```powershell
+npm run test:e2e
+```
+
+Expected: **6 passed, 1 skipped** with installed Microsoft Edge and the retained demo run. The live-model case is deliberately skipped unless SOLOESTATE_LIVE_UI=1. Browser approval testing uses a newly created fictional draft and deletes only its records afterward. Do not run several browser suites concurrently against the same output directory.
+
+## Failure reports
+
+Share the exact command, failing test name, assertion/traceback and sanitized terminal logs. For browser failures include the matching error-context file or screenshot from frontend/test-results after checking it contains only fictional data. Keep .env contents, sign-in links, cookies, API keys and credential-bearing database URLs private. A connectivity/permission failure is not evidence that a business operation succeeded. For an ambiguous real request inspect its saved run/key before retrying.
+
+No new runtime dependency, migration, secret or Supabase configuration is required for Phase 9. Historical verification records are kept in their phase documents; historical Phase 9 results are in [phase-9-verification.md](phase-9-verification.md) and current packaging evidence is in [phase-10-verification.md](phase-10-verification.md).
+
+Phase 10 adds five preflight unit tests (readiness, missing configuration, sanitized errors, failed database gating and service health validation). These do not call Meta or PostgreSQL. See phase-10-verification.md for executed evidence.

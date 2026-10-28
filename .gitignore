@@ -1,0 +1,39 @@
+# Secrets (examples are safe to commit)
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.install-tmp/
+test_baseten.py
+test_meta_api.py
+AGENTS.md
+
+# JavaScript / Next.js
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local output and editor files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Dashboard QA artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/artifacts/
