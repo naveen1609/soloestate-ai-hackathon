@@ -54,7 +54,7 @@ def review(approval_id: UUID, service: OwnerService = Depends(owner_service)):
 def pending():
     with connect(Settings()) as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows = cur.execute("SELECT id,run_id,kind,payload FROM soloestate.approvals WHERE status='pending' ORDER BY created_at,id LIMIT 101").fetchall()
+            rows = cur.execute("SELECT a.id,a.run_id,a.kind,a.payload FROM soloestate.approvals a JOIN soloestate.runs r ON r.id=a.run_id WHERE a.status='pending' AND r.origin='agent' ORDER BY a.created_at,a.id LIMIT 101").fetchall()
     return {"approvals": [{**row,"payload_hash":payload_hash(row["payload"])} for row in rows[:100]], "truncated":len(rows)>100}
 
 
@@ -74,7 +74,7 @@ def runs(request_key: str | None = Query(default=None,min_length=1,max_length=12
         return RunStore().find(request_key)
     with connect(Settings()) as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows=cur.execute("SELECT id,request_key,goal,status,updated_at FROM soloestate.runs ORDER BY updated_at DESC,id LIMIT 21").fetchall()
+            rows=cur.execute("SELECT id,request_key,goal,status,updated_at FROM soloestate.runs WHERE origin='agent' ORDER BY updated_at DESC,id LIMIT 21").fetchall()
     return {"runs":rows[:20],"truncated":len(rows)>20}
 
 

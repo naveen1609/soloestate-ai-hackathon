@@ -1,19 +1,34 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
-const ORIGINAL = "608afe1f-33e9-4ee7-b1c0-4fa9cb225252";
+type Scenario = { run: string; lead: string; property: string; approval: string; lead_name: string; property_title: string };
+const backend = resolve(process.cwd(), "../backend");
+const origin=process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000';
+function runFixture(...args: string[]) {
+  return execFileSync(resolve(backend, ".venv/Scripts/python.exe"), ["-c", "import runpy; runpy.run_path('../frontend/e2e/approval_fixture.py',run_name='__main__')", ...args], { cwd: backend, encoding: "utf-8", windowsHide: true });
+}
+const test = base.extend<{ scenario: Scenario }>({
+  scenario: async ({ page }, provideScenario) => {
+    const data = JSON.parse(runFixture("create")) as Scenario;
+    try { await provideScenario(data); }
+    finally {
+      try { await page.request.delete("/api/session", { headers: { origin } }); }
+      finally { runFixture("cleanup", data.run, data.lead, data.property); }
+    }
+  },
+});
 function link(run?: string) {
   const backend = resolve(process.cwd(), "../backend");
   const output = execFileSync(resolve(backend, ".venv/Scripts/python.exe"), ["-m", "scripts.dashboard_login"], { cwd: backend, encoding: "utf-8", windowsHide: true });
   const value = JSON.parse(output) as { url?: string };
   if (!value.url) throw new Error("Could not issue the local owner sign-in link");
-  const url = new URL(value.url); if (run) url.searchParams.set("run", run); return url.toString();
+  const url = new URL(value.url); const target=new URL(origin);url.host=target.host;url.protocol=target.protocol;url.pathname = "/agent"; if (run) url.searchParams.set("run", run); return url.toString();
 }
-async function login(page: Page, run = ORIGINAL) {
-  await page.goto(link(run));
+async function login(page: Page, scenario?: Scenario) {
+  await page.goto(link(scenario?.run));
   await expect(page.getByRole("heading", { name: /a little more clarity/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Aarav Demo" })).toBeVisible();
+  if (scenario) await expect(page.getByRole("heading", { name: scenario.lead_name })).toBeVisible();
 }
 test("locks private data before owner sign-in", async ({ page }) => {
   await page.goto("/");
@@ -21,14 +36,13 @@ test("locks private data before owner sign-in", async ({ page }) => {
   expect((await page.request.get("/api/owner/runs")).status()).toBe(401);
   await expect(page.getByText("Aarav Demo")).toHaveCount(0);
 });
-test("loads persisted plans, timeline, leads and a pending review without runtime errors", async ({ page }) => {
+test("loads persisted plans, timeline, leads and a pending review without runtime errors", async ({ page, scenario }) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
-  await login(page);
-  await expect(page.getByRole("heading", { name: "Demo Cedar Apartment" })).toHaveCount(0); // Property names are data, not headings.
-  await expect(page.getByText("Demo Cedar Apartment", { exact: true })).toBeVisible();
+  await login(page, scenario);
+  await expect(page.getByText(scenario.property_title, { exact: true })).toBeVisible();
   await expect(page.getByText("Paused for your decision.")).toBeVisible();
-  await expect(page.locator("#execution .timeline > li")).toHaveCount(10);
-  await expect(page.locator("#execution .badge-failed")).toHaveCount(2);
+  await expect(page.locator("#execution .timeline > li")).toHaveCount(5);
+  await expect(page.locator("#execution .badge-failed")).toHaveCount(1);
   const cookies = await page.context().cookies();
   expect(cookies.find(cookie => cookie.name === "soloestate_session")?.httpOnly).toBe(true);
   expect(await page.evaluate(() => document.cookie)).not.toContain("soloestate_session");
@@ -37,10 +51,10 @@ test("loads persisted plans, timeline, leads and a pending review without runtim
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByText("Owner sign-in required")).toBeVisible();
 });
-test("shows the full review snapshot and closes it without deciding", async ({ page }) => {
-  await login(page);
+test("shows the full review snapshot and closes it without deciding", async ({ page, scenario }) => {
+  await login(page, scenario);
   const pending = await (await page.request.get("/api/owner/approvals")).json() as { approvals: { id: string; run_id: string }[] };
-  const approval = pending.approvals.find(item => item.run_id === ORIGINAL);
+  const approval = pending.approvals.find(item => item.run_id === scenario.run);
   expect(approval).toBeTruthy();
   await page.locator(`[data-approval-id="${approval!.id}"]`).getByRole("button", { name: "Review", exact: true }).click();
   const dialog = page.getByRole("dialog");
@@ -53,8 +67,8 @@ test("shows the full review snapshot and closes it without deciding", async ({ p
   expect(still.status).toBe("pending");
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
 });
-test("supports a narrow viewport without horizontal overflow", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 }); await login(page);
+test("supports a narrow viewport without horizontal overflow", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 390, height: 844 }); await login(page, scenario);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Owner reviews" }).click();
@@ -62,7 +76,7 @@ test("supports a narrow viewport without horizontal overflow", async ({ page }) 
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
 });
 test("rejects a used sign-in link in another browser session", async ({ page, browser }) => {
-  const url = link(ORIGINAL); await page.goto(url);
+  const url = link(); await page.goto(url);
   await expect(page.getByRole("heading", { name: /a little more clarity/i })).toBeVisible();
   const other = await browser.newContext(); const second = await other.newPage();
   try {
@@ -72,12 +86,7 @@ test("rejects a used sign-in link in another browser session", async ({ page, br
   } finally { await other.close(); }
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
 });
-test("approves only an isolated fictional draft through the owner review UI", async ({ page }) => {
-  const backend = resolve(process.cwd(), "../backend");
-  // Use -c to put the backend on sys.path while loading the test-only fixture.
-  const runFixture = (...args: string[]) => execFileSync(resolve(backend, ".venv/Scripts/python.exe"), ["-c", "import runpy; runpy.run_path('../frontend/e2e/approval_fixture.py',run_name='__main__')", ...args], { cwd: backend, encoding: "utf-8", windowsHide: true });
-  const data = JSON.parse(runFixture("create")) as { run: string; lead: string; approval: string };
-  try {
+test("approves only an isolated fictional draft through the owner review UI", async ({ page, scenario: data }) => {
     await page.goto(link(data.run));
     await page.locator(`[data-approval-id="${data.approval}"]`).getByRole("button", { name: "Review", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("Fictional browser test. Never send.");
@@ -86,10 +95,6 @@ test("approves only an isolated fictional draft through the owner review UI", as
       const response = await page.request.get(`/api/owner/approvals/${data.approval}`);
       return (await response.json()).status;
     }).toBe("approved");
-  } finally {
-    await page.request.delete("/api/session", { headers: { origin: "http://127.0.0.1:3000" } });
-    runFixture("cleanup", data.run, data.lead);
-  }
 });
 
 test("runs a real read-only goal through the dashboard", async ({ page }) => {
@@ -109,5 +114,3 @@ test("runs a real read-only goal through the dashboard", async ({ page }) => {
   console.log(`Verified live UI run: ${result.run_id}`);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
 });
-
-

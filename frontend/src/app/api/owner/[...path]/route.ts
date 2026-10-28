@@ -3,6 +3,11 @@ import { baseUrl, body, clear, COOKIE, error, sameOrigin } from "../../../../lib
 
 const uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 export function permitted(method: string, path: string): boolean {
+  if (path.startsWith('crm/')) {
+    if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$`).test(path);
+    if (method === 'PATCH') return new RegExp(`^crm/(leads|properties)/${uuid}$`).test(path);
+    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/archive$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$`).test(path);
+  }
   return method === "GET" ? new RegExp(`^(runs|approvals)(/${uuid})?$`).test(path) :
     method === "POST" && (path === "runs" || new RegExp(`^runs/${uuid}/resume$|^approvals/${uuid}/decision$`).test(path));
 }
@@ -13,10 +18,17 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const path = (await context.params).path.join("/");
   if (!permitted(request.method, path)) return error("Endpoint is not permitted.", 404);
   const query = request.nextUrl.searchParams;
-  if ([...query.keys()].some(key => path !== "runs" || key !== "request_key") || (query.get("request_key")?.length ?? 0) > 128) return error("Invalid query.", 400);
+  const crmQueries: Record<string,string[]> = {
+    'crm/leads':['q','sort','page','page_size','status','archived'],
+    'crm/properties':['q','sort','page','page_size','active','locality','bedrooms','min_price','max_price'],
+    'crm/appointments':['q','sort','page','page_size','status','period','lead_id','property_id','since','until'],
+    'crm/visit-slots':['since','until'],
+  };
+  const allowed = path === 'runs' ? ['request_key'] : crmQueries[path] ?? [];
+  if ([...query.keys()].some(key => !allowed.includes(key) || query.getAll(key).length !== 1) || (query.get("request_key")?.length ?? 0) > 128 || query.toString().length > 4000) return error("Invalid query.", 400);
   try {
-    const payload = request.method === "POST" ? JSON.stringify(await body(request)) : undefined;
-    const upstream = await fetch(`${baseUrl()}/owner/${path}${query.size ? `?${query}` : ""}`, { method: request.method, headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" }, body: payload, cache: "no-store", signal: AbortSignal.timeout(request.method === "POST" && !path.endsWith("decision") ? 900_000 : 30_000) });
+    const payload = request.method !== "GET" ? JSON.stringify(await body(request)) : undefined;
+    const upstream = await fetch(`${baseUrl()}/owner/${path}${query.size ? `?${query}` : ""}`, { method: request.method, headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" }, body: payload, cache: "no-store", signal: AbortSignal.timeout(path.startsWith('crm/') ? 60_000 : request.method === "POST" && !path.endsWith("decision") ? 900_000 : 30_000) });
     const value: unknown = await upstream.json();
     const response = NextResponse.json(value, { status: upstream.status, headers: { "Cache-Control": "no-store" } });
     return upstream.status === 401 ? clear(response) : response;
@@ -24,3 +36,4 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 }
 export const GET = proxy;
 export const POST = proxy;
+export const PATCH = proxy;

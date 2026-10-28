@@ -28,7 +28,7 @@ Set-Location 'D:\programing_tools\Meta Global AI Developer Hackathon\soloestate-
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **128 passed, 55 skipped**, plus an upstream Starlette/AnyIO deprecation warning; dependency check reports no broken requirements. Default tests do not opt into the configured application database.
+Expected: **152 passed, 75 skipped**, plus an upstream Starlette/AnyIO deprecation warning; dependency check reports no broken requirements. Default tests do not opt into the configured application database.
 
 For all existing and new tool/agent/integrity database cases:
 
@@ -36,7 +36,7 @@ For all existing and new tool/agent/integrity database cases:
 .\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
 ```
 
-Expected: **178 passed, 5 skipped** with configured Supabase access and migrations 0001–0003. Tests never use real model credits. The five original schema cases require a separate empty disposable TEST_DATABASE_URL and are excluded from application-database runs. Never point TEST_DATABASE_URL at the demo or production database; see [database.md](database.md).
+Expected: **222 passed, 5 skipped** with configured Supabase access and migrations 0001–0004. Tests never use real model credits. The five original schema cases require a separate empty disposable TEST_DATABASE_URL and are excluded from application-database runs. Never point TEST_DATABASE_URL at the demo or production database; see [database.md](database.md).
 
 To run the same coverage in smaller groups:
 
@@ -55,7 +55,7 @@ npm run typecheck
 npm run build
 ```
 
-Expected: **38 frontend tests pass**, lint/typecheck exit zero and production build completes. Stop a running production frontend before rebuilding its output directory.
+Expected: **65 frontend tests pass**, lint/typecheck exit zero and production build completes. Stop a running production frontend before rebuilding its output directory.
 
 For browser checks, start the backend as documented in [dashboard.md](dashboard.md), then run:
 
@@ -63,7 +63,7 @@ For browser checks, start the backend as documented in [dashboard.md](dashboard.
 npm run test:e2e
 ```
 
-Expected: **6 passed, 1 skipped** with installed Microsoft Edge and the retained demo run. The live-model case is deliberately skipped unless SOLOESTATE_LIVE_UI=1. Browser approval testing uses a newly created fictional draft and deletes only its records afterward. Do not run several browser suites concurrently against the same output directory.
+Expected: **7 passed, 1 skipped** with installed Microsoft Edge and a configured backend. The suite uses temporary fictional runs rather than a historical demo run. The live-model case is deliberately skipped unless SOLOESTATE_LIVE_UI=1. Browser approval testing uses a newly created fictional draft and deletes only its records afterward. Do not run several browser suites concurrently against the same output directory.
 
 ## Failure reports
 
@@ -72,3 +72,11 @@ Share the exact command, failing test name, assertion/traceback and sanitized te
 No new runtime dependency, migration, secret or Supabase configuration is required for Phase 9. Historical verification records are kept in their phase documents; historical Phase 9 results are in [phase-9-verification.md](phase-9-verification.md) and current packaging evidence is in [phase-10-verification.md](phase-10-verification.md).
 
 Phase 10 adds five preflight unit tests (readiness, missing configuration, sanitized errors, failed database gating and service health validation). These do not call Meta or PostgreSQL. See phase-10-verification.md for executed evidence.
+
+Browser isolation fix (28 October 2026): approval changes made during manual dashboard use must not invalidate browser assertions. Stateful browser checks now create their own uniquely identified fictional lead/property/run, execute real read/draft/approval tools with persisted evidence, and clean up in fixture teardown. They no longer assume a particular historical run is pending or has a fixed model timeline. No real model credits are used unless the live case is explicitly enabled.
+
+The isolated browser suite was executed after this fix: **6 passed, 1 skipped** in 3.2 minutes. Lint and TypeScript checks passed. The skipped case is the explicit live-Meta opt-in. Existing application/runtime code was unchanged.
+
+## Phase A CRM coverage
+
+Current CRM/appointment tests live in backend/tests/test_crm.py, backend/tests/test_crm_database.py, frontend/src/components/crm.test.tsx and frontend/e2e/crm.spec.ts. They cover validated owner CRUD, query filters/pagination, missing/stale records, archive/deactivation, versioned consent/booking, cancellation, atomic replacement, operation replay, commit/report failure and competing bookings. See phase-a-verification.md for current executed counts; older counts above describe earlier increments. The ordinary browser suite now has one additional real CRM owner journey.

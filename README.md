@@ -2,7 +2,11 @@
 
 An owner-directed AI Business Operating System for a one-person real estate company. Give it a business goal; Meta Muse Spark proposes a structured plan, chooses permitted tools, observes real results, adapts to failures and stops for owner approval.
 
-**Phases 1–10 implemented.** The local hackathon application has a responsive dashboard, real Meta integration, persistent Supabase records, approval gates, booking integrity, bounded recovery and automated regression coverage. This is a single-owner demonstration; see [limitations](docs/limitations.md).
+**Phase A Core CRM implemented; phases 1–10 preserved.** The local hackathon application has a responsive dashboard, real Meta integration, persistent Supabase records, approval gates, booking integrity, bounded recovery and automated regression coverage. This is a single-owner demonstration; see [limitations](docs/limitations.md).
+
+## Core CRM update
+
+The overview now shows live business records. Leads, properties and appointments have owner-managed CRM workspaces; the Muse Spark goal dashboard remains at `/agent`. See [Phase A setup and owner walkthrough](docs/phase-a.md), [verification evidence](docs/phase-a-verification.md), and the separate [Phase B proposal](docs/phase-b-plan.md). Restart existing servers after updating.
 
 ## Run locally
 
@@ -44,7 +48,7 @@ Run each command separately and stop on a nonzero exit code:
 .\.venv\Scripts\python.exe -m scripts.demo_preflight
 ```
 
-Expected: status ok, three migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
+Expected: status ok, four migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
 
 Start the API and keep this terminal open:
 
@@ -112,7 +116,7 @@ From backend:
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **128 passed, 55 skipped** and no broken requirements. With the opt-in tool/agent/integrity flags, the current suite is expected to produce **178 passed, 5 skipped**. Phase 9 executed all business database cases in groups; Phase 10 adds five preflight tests. Five schema cases still require a separate empty disposable TEST_DATABASE_URL and are not claimed as passed.
+Expected: **152 passed, 75 skipped** and no broken requirements. With the opt-in tool/agent/integrity flags, the current suite is expected to produce **222 passed, 5 skipped**. Phase 9 executed all business database cases in groups; Phase 10 adds five preflight tests. Five schema cases still require a separate empty disposable TEST_DATABASE_URL and are not claimed as passed.
 
 From frontend:
 
@@ -124,7 +128,7 @@ npm run build
 npm run test:e2e
 ```
 
-Expected: **38 unit/component tests pass**, lint/typecheck/build exit zero, **6 browser checks pass and 1 live-model case skips**. Browser checks require a running configured backend, Microsoft Edge and the retained demo run. External model calls are mocked in automated backend tests; production has no mock AI fallback.
+Expected: **65 unit/component tests pass**, lint/typecheck/build exit zero, **7 browser checks pass and 1 live-model case skips**. Browser checks require a running configured backend and Microsoft Edge. Each stateful check creates its own fictional scenario and cleans it up; saved demo decisions do not affect assertions. External model calls are mocked in automated backend tests; production has no mock AI fallback.
 
 See [test commands and coverage matrix](docs/testing.md), [Phase 9 evidence](docs/phase-9-verification.md), and [Phase 10 evidence](docs/phase-10-verification.md). Prior phase documents are historical records of their respective implementations.
 

@@ -44,7 +44,7 @@ On the configured demonstration database, select the retained original draft-fir
 
 `608afe1f-33e9-4ee7-b1c0-4fa9cb225252`
 
-This is clearly labeled **persisted historical execution**, not a fresh model request. It shows three reviewed leads, two matches, actual invalid approval attempts followed by model correction, one saved draft and an owner approval stop. Open Review to display recipient, full subject/body, version and snapshot. Close it without deciding unless the human owner explicitly chooses to approve or reject.
+This is clearly labeled **persisted historical execution**, not a fresh model request. Its current status may change after manual approval, rejection or continuation. If it no longer has a pending review, create the fresh draft-first demo below; do not undo a real owner decision to match an old screenshot. It shows three reviewed leads, two matches, actual invalid approval attempts followed by model correction, one saved draft and an owner approval stop. Open Review to display recipient, full subject/body, version and snapshot. Close it without deciding unless the human owner explicitly chooses to approve or reject.
 
 A fresh repository/database has no retained execution run. Generate a fresh approval demo from backend instead:
 
@@ -87,3 +87,5 @@ The lookup is read-only and does not call Meta. Read reason/status, verified_ste
 ## If connectivity fails during the presentation
 
 Keep the error visible, explain what is unconfirmed, and show the retained historical run with its date and real evidence. Do not substitute a fake model response. Share only the command, exit code and sanitized error/check name. Meta errors may reflect credentials, credits, access or timeouts; database errors may reflect connectivity/TLS/privileges. Regenerate expired sign-in links privately. Stop servers with Ctrl+C when finished.
+
+Phase A navigation update: owner sign-in now opens the live business overview. Choose AI execution (or /agent) for the original goal demonstration above. The CRM owner walkthrough is in phase-a.md. Existing ?run links are forwarded to the execution workspace after sign-in.

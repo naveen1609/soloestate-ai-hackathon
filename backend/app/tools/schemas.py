@@ -13,6 +13,7 @@ class Input(BaseModel):
 class ToolContext(BaseModel):
     # Server-supplied context, never part of a model tool's arguments.
     run_id: UUID
+    replaces_booking_id: UUID | None = None
 
 
 class Window(Input):

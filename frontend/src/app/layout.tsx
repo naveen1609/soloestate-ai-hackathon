@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import './crm.css';
 
 export const metadata: Metadata = {
   title: "SoloEstate AI",

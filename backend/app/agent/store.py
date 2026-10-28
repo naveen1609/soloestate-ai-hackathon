@@ -56,6 +56,8 @@ class RunStore:
                 row = cur.execute("SELECT *,lease_until>clock_timestamp() AS active FROM soloestate.runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
                 if row is None:
                     raise RunConflict("Run was not found.")
+                if row['origin'] != 'agent':
+                    raise RunConflict('Owner CRM operations cannot be resumed as AI runs.')
                 if row["status"] in {"completed", "cancelled"}:
                     if row["outcome"] is None:
                         raise RunConflict("Closed run has no verified report; manual inspection is required.")

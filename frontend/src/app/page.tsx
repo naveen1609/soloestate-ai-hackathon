@@ -1,3 +1,3 @@
-import Dashboard from "../components/dashboard";
+import CrmOverview from "../components/crm-overview";
 
-export default function Home() { return <Dashboard />; }
+export default function Home() { return <CrmOverview />; }

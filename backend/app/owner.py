@@ -72,7 +72,9 @@ class OwnerService:
                 draft = None
                 if row["kind"] == "followup":
                     draft = cur.execute("SELECT * FROM soloestate.followup_drafts WHERE id=%s FOR UPDATE", (row["draft_id"],)).fetchone()
-                    lead = cur.execute("SELECT email FROM soloestate.leads WHERE id=%s FOR SHARE", (row["lead_id"],)).fetchone()
+                    lead = cur.execute("SELECT email,archived_at FROM soloestate.leads WHERE id=%s FOR SHARE", (row["lead_id"],)).fetchone()
+                    if request.decision=='approved' and lead['archived_at'] is not None:
+                        raise RunConflict('Lead is archived; restore it before approving a follow-up.')
                     current = {"draft_id": str(draft["id"]), "lead_id": str(draft["lead_id"]), "version": draft["version"],
                                "channel": draft["channel"], "recipient": lead["email"], "subject": draft["subject"], "body": draft["body"]}
                     if request.decision == "approved" and (draft["status"] != "draft" or current != row["payload"]):

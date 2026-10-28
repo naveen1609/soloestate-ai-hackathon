@@ -9,6 +9,8 @@ from app.database import DatabaseConfigurationError
 from app.owner_api import router as owner_router
 from app.services.meta_model import ModelServiceError
 from app.dashboard_api import router as dashboard_router
+from app.crm_api import router as crm_router
+from app.crm import CRMError
 
 
 class HealthResponse(BaseModel):
@@ -21,6 +23,11 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.include_router(owner_router)
     app.include_router(dashboard_router)
+    app.include_router(crm_router)
+
+    @app.exception_handler(CRMError)
+    async def crm_error(request,exc):
+        return JSONResponse(status_code=exc.status,content={'status':'error','message':str(exc)})
 
     @app.exception_handler(RunConflict)
     async def conflict(request, exc):

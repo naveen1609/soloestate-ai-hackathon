@@ -29,13 +29,13 @@ def required(row, label="Record"):
 
 def get_leads(cur, args: s.GetLeadsInput, context):
     rows = cur.execute("""SELECT * FROM soloestate.leads
-        WHERE created_at >= %s AND created_at < %s
+        WHERE archived_at IS NULL AND created_at >= %s AND created_at < %s
         ORDER BY created_at DESC, id LIMIT %s""", (args.since, args.until, args.limit + 1)).fetchall()
     return s.LeadsOutput(leads=rows[:args.limit], truncated=len(rows) > args.limit)
 
 
 def get_property_matches(cur, args: s.GetMatchesInput, context):
-    lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s", (args.lead_id,)).fetchone(), "Lead")
+    lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL", (args.lead_id,)).fetchone(), "Active lead")
     rows = cur.execute("""SELECT id,title,locality,price,bedrooms,description,
         CASE WHEN bedrooms=%s THEN 100 ELSE 90 END AS score
         FROM soloestate.properties WHERE active AND price BETWEEN %s AND %s
@@ -82,7 +82,7 @@ def create_followup_draft(cur, args: s.DraftInput, context):
         _same(row["lead_id"] == args.lead_id and row["subject"] == args.subject and row["body"] == args.body)
         return s.DraftOutput(draft=row, created=False)
     _require_open(status)
-    required(cur.execute("SELECT id FROM soloestate.leads WHERE id=%s FOR SHARE", (args.lead_id,)).fetchone(), "Lead")
+    required(cur.execute("SELECT id FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (args.lead_id,)).fetchone(), "Active lead")
     row = cur.execute("""INSERT INTO soloestate.followup_drafts
         (id,run_id,lead_id,idempotency_key,subject,body) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
         (uuid4(), context.run_id, args.lead_id, args.idempotency_key, args.subject, args.body)).fetchone()
@@ -94,6 +94,8 @@ def _booking_snapshot(cur, lead_id, property_id, slot_id):
     slot = required(cur.execute("SELECT * FROM soloestate.visit_slots WHERE id=%s FOR UPDATE", (slot_id,)).fetchone(), "Slot")
     prop = required(cur.execute("SELECT * FROM soloestate.properties WHERE id=%s FOR SHARE", (property_id,)).fetchone(), "Property")
     lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE", (lead_id,)).fetchone(), "Lead")
+    if lead['archived_at'] is not None:
+        raise ToolFailure('lead_unavailable', 'The lead is archived.')
     now = cur.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
     if not slot["enabled"] or slot["starts_at"] <= now:
         raise ToolFailure("slot_unavailable", "The appointment slot is disabled or has already started.")
@@ -121,7 +123,7 @@ def request_approval(cur, args: s.ApprovalInput, context):
                                      (args.draft_id, context.run_id)).fetchone(), "Draft in this run")
         if draft["status"] != "draft":
             raise ToolFailure("invalid_state", "Only a draft can be submitted for follow-up approval.")
-        lead = required(cur.execute("SELECT email FROM soloestate.leads WHERE id=%s FOR SHARE", (draft["lead_id"],)).fetchone(), "Lead")
+        lead = required(cur.execute("SELECT email FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (draft["lead_id"],)).fetchone(), "Active lead")
         lead_id = draft["lead_id"]
         payload = {"draft_id": str(draft["id"]), "lead_id": str(lead_id), "version": draft["version"],
                    "channel": draft["channel"], "recipient": lead["email"], "subject": draft["subject"], "body": draft["body"]}
@@ -155,9 +157,9 @@ def book_site_visit(cur, args: s.BookInput, context):
     if payload != approval["payload"]:
         raise ToolFailure("stale_approval", "The approved booking details changed; request fresh owner approval.")
     row = cur.execute("""INSERT INTO soloestate.bookings
-        (id,run_id,approval_id,lead_id,property_id,slot_id,idempotency_key)
-        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-        (uuid4(), context.run_id, approval["id"], approval["lead_id"], approval["property_id"], approval["slot_id"], args.idempotency_key)).fetchone()
+        (id,run_id,approval_id,lead_id,property_id,slot_id,idempotency_key,replaces_booking_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+        (uuid4(), context.run_id, approval["id"], approval["lead_id"], approval["property_id"], approval["slot_id"], args.idempotency_key, context.replaces_booking_id)).fetchone()
     cur.execute("UPDATE soloestate.approvals SET status='consumed' WHERE id=%s", (approval["id"],))
     return s.BookingOutput(booking=row, created=True)
 

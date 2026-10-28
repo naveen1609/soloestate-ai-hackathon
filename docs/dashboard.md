@@ -54,7 +54,7 @@ npm run typecheck
 npm run test:e2e
 ```
 
-The browser suite requires a running backend, configured owner/database credentials, retained demo run, and installed Microsoft Edge. It creates and deletes an isolated fictional draft for the approval test; it never decides the retained demo approval. The real-model browser test is opt-in:
+The browser suite requires a running backend, configured owner/database credentials and installed Microsoft Edge. Stateful checks create isolated fictional runs, leads, properties, real tool evidence and pending drafts, then remove their exact fixture records even on assertion failure. Existing demo decisions can change freely; tests never decide those approvals. The real-model browser test is opt-in:
 
 ```powershell
 $env:SOLOESTATE_LIVE_UI='1'
@@ -63,3 +63,5 @@ Remove-Item Env:SOLOESTATE_LIVE_UI
 ```
 
 If a command fails, share its command, sanitized error, failed test name, browser error and corresponding backend/frontend logs. For sign-in failures issue a fresh link and check database migration/configuration. For a timeout retain the displayed request key and check the saved run first. Never share sign-in URLs, cookies, .env contents, API keys or database passwords. This is a single-owner local hackathon implementation; multi-owner accounts and production identity management are outside Phase 8.
+
+Phase A: the existing execution dashboard is now at /agent. The sign-in link opens the live CRM overview at /. All original goal/run/approval behavior is retained. See phase-a.md for lead/property/appointment screens and operations.

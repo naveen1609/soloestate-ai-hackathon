@@ -1,6 +1,6 @@
 # PostgreSQL and Supabase setup
 
-The application uses three immutable migrations and deterministic fictional data. Live Supabase connectivity, checksummed setup, typed business tools, owner consent, booking integrity and session persistence have been verified. Five schema tests still require a separate empty disposable test database; see testing.md.
+The application uses four immutable migrations and deterministic fictional data. Live Supabase connectivity, checksummed setup, typed business tools, owner consent, booking integrity and session persistence have been verified. Five schema tests still require a separate empty disposable test database; see testing.md.
 
 ## Supabase project and connection
 
@@ -44,9 +44,9 @@ Stop at a nonzero exit code and resolve it before running the next command. Ever
 
 ```json
 {"status":"ok","connected":true}
-{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql"]}
+{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql","0004_core_crm.sql"]}
 {"status":"ok","seeded":true}
-{"status":"ok","migrations":3,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
+{"status":"ok","migrations":4,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
 ```
 
 Repeat `migrate`, `seed`, and `verify` to check repeatability. A repeated migration returns `applied: []`; seeds do not duplicate rows or overwrite existing edits. Missing seed IDs are restored when seeding again. The verification counts exact fictional IDs; it is not a full checksum of current business records.
@@ -80,7 +80,7 @@ Owner authentication, immutable snapshots, version/hash binding, approval transi
 ## Privacy and access
 
 - `soloestate` is a private schema. Leave it out of Supabase's exposed Data API schemas.
-- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all twelve tables with no browser access policies. Newly created schema defaults must remain private.
+- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all thirteen tables with no browser access policies. Newly created schema defaults must remain private.
 - No anon/authenticated role grants, browser Supabase client, public database endpoint, or service-role API key is added.
 - Database owners bypass RLS. RLS here is an additional browser-access barrier, not owner authorization or multi-tenancy. The backend is the trusted boundary.
 - Restrict project access, database network access, and deployment secrets appropriately. Never log DSNs or share certificate private keys (the downloaded server CA certificate is public).
@@ -126,3 +126,5 @@ Percent-encode reserved characters in the URI password before inserting it in th
 Phase 7 update: the second immutable migration adds worker state/leases/resume limits and owner decision evidence. Approval/draft/booking/slot triggers now enforce the invariants described in owner-recovery.md. The original migration remains unchanged. New-project verification expects three applied migrations and the same fictional seed counts.
 
 Phase 8 update: immutable migration 0003_dashboard_sessions.sql adds hashed, expiring one-time tickets and revocable owner browser sessions. The schema now has twelve private RLS-enabled tables and three applied migrations; fictional seed counts remain unchanged.
+
+Phase A update: migration 0004_core_crm.sql adds archive/version metadata, owner-operation provenance, replacement-booking linkage, cancellation reason and the private crm_operations audit/idempotency table. Current verification expects four migrations and thirteen RLS-enabled tables. Previously applied migrations and seed checksums remain unchanged. See phase-a.md.

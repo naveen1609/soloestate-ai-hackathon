@@ -56,3 +56,7 @@ Default limits are 12 model responses, 16 native calls, 3 failures and 180 secon
 ## Deployment boundary
 
 Execution is request-based; there is no background worker, queue, websocket stream or automatic scheduler. Local servers bind loopback. Process interruption leaves durable evidence for bounded owner recovery. HTTPS, managed identity, restricted runtime database privileges, monitoring and deployment-specific origin/proxy configuration require separate deployment work. See [limitations](limitations.md). The project does not claim production readiness or independent semantic certification of every goal.
+
+## Phase A CRM extension
+
+Migration 0004 adds versioned CRM operations and owner provenance without replacing bookings or consent. The current operational overview is `/`; the existing agent UI is `/agent`. Owner CRUD and reviewed appointment operations use authenticated `/owner/crm` routes through the fixed Next.js proxy. They share the same lead/property/slot tables. Owner consent containers have origin=owner, empty model traces and no invented AI steps, and cannot be resumed by the agent. See phase-a.md for transaction/retry rules and phase-b-plan.md for the future customer journey and policy boundaries.
