@@ -40,7 +40,12 @@ SORTS={
  'appointments':{'starts_asc':'s.starts_at ASC','starts_desc':'s.starts_at DESC','created_desc':'e.created_at DESC'},
 }
 TABLES={'leads':'leads','properties':'properties','appointments':'bookings'}
-APPOINTMENT_SELECT="e.*,l.name AS lead_name,l.email,p.title AS property_title,s.starts_at,s.ends_at,r.origin"
+REPLACED_BY="EXISTS(SELECT 1 FROM soloestate.bookings r WHERE r.replaces_booking_id=e.id)"
+VISIT_RESULT=("CASE WHEN e.visit_outcome='completed' THEN 'completed' WHEN e.visit_outcome='no_show' THEN 'no_show' "
+    "WHEN e.status='cancelled' AND "+REPLACED_BY+" THEN 'rescheduled' WHEN e.status='cancelled' THEN 'cancelled' "
+    "ELSE 'scheduled' END")
+APPOINTMENT_SELECT=("e.*,l.name AS lead_name,l.email,p.title AS property_title,s.starts_at,s.ends_at,r.origin,"+
+    REPLACED_BY+" AS has_replacement,"+VISIT_RESULT+" AS visit_result")
 APPOINTMENT_FROM="soloestate.bookings e JOIN soloestate.leads l ON l.id=e.lead_id JOIN soloestate.properties p ON p.id=e.property_id JOIN soloestate.visit_slots s ON s.id=e.slot_id JOIN soloestate.runs r ON r.id=e.run_id"
 
 
@@ -53,7 +58,7 @@ class CRM:
             return found(conn.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',(key,)).fetchone())[0]
 
     def mutate(self,action,request,work):
-        from app.crm_schemas import LeadCreate, LeadUpdate, TaskUpdate
+        from app.crm_schemas import LeadCreate, LeadUpdate, TaskUpdate, OutcomeUpdate
         data=request.model_dump(mode='json')
         # Omitting a PATCH field preserves it; explicit null clears it. Bind that distinction.
         legacy_digest=None
@@ -64,7 +69,7 @@ class CRM:
             if 'purchase_timeframe' not in request.model_fields_set:
                 legacy_digest=payload_hash(identity)
             identity['provided_fields']=sorted(request.model_fields_set)
-        if isinstance(request,TaskUpdate):
+        if isinstance(request,(TaskUpdate,OutcomeUpdate)):
             identity['provided_fields']=sorted(request.model_fields_set)
         digest=payload_hash(identity)
         try:
@@ -86,7 +91,7 @@ class CRM:
         except (psycopg.errors.LockNotAvailable,psycopg.errors.DeadlockDetected,psycopg.errors.SerializationFailure):
             raise CRMError('Another operation is executing. Retry the same saved request; no new result is confirmed.',503) from None
 
-    def listing(self,entity,*,q='',sort=None,page=1,page_size=20,status=None,archived=False,active=None,locality=None,bedrooms=None,min_price=None,max_price=None,period=None,lead_id=None,property_id=None,since=None,until=None):
+    def listing(self,entity,*,q='',sort=None,page=1,page_size=20,status=None,archived=False,active=None,locality=None,bedrooms=None,min_price=None,max_price=None,period=None,lead_id=None,property_id=None,since=None,until=None,outcome=None):
         if entity not in TABLES: raise CRMError('Unknown entity.',404)
         order=sort or next(iter(SORTS[entity]))
         if order not in SORTS[entity]: raise CRMError('Sort is not permitted.',422)
@@ -114,6 +119,9 @@ class CRM:
             if status:
                 if status not in ('confirmed','cancelled'): raise CRMError('Invalid appointment status.',422)
                 where('e.status=%s',status)
+            if outcome:
+                if outcome not in ('completed','no_show'): raise CRMError('Invalid visit outcome.',422)
+                where('e.visit_outcome=%s',outcome)
             if period=='upcoming': where('s.starts_at>clock_timestamp()')
             elif period=='past': where('s.ends_at<=clock_timestamp()')
             if lead_id: where('e.lead_id=%s',lead_id)
@@ -250,6 +258,7 @@ class CRM:
         with conn.cursor(row_factory=dict_row) as cur:
             row=found(cur.execute('SELECT * FROM soloestate.bookings WHERE id=%s FOR UPDATE',(identifier,)).fetchone())
             if row['version']!=version or row['status']!='confirmed': raise CRMError('Appointment changed or is no longer confirmed. Reload it.')
+            if row['visit_outcome'] is not None: raise CRMError('Visits with a recorded outcome cannot be cancelled or rescheduled.')
             active=conn.execute("SELECT status='running' AND lease_until>clock_timestamp() FROM soloestate.runs WHERE id=%s",(row['run_id'],)).fetchone()[0]
             if active: raise CRMError('The agent is still executing this appointment. Wait until it stops.')
         return row

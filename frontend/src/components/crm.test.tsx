@@ -127,6 +127,61 @@ it('uses the committed journey version for an immediate lead edit',async()=>{
 });
 
 
+it('records a visit outcome with its expected version and shows the confirmed result',async()=>{
+ const user=userEvent.setup();let record:Record<string,string|number|boolean|null>={id:ID,lead_id:ID,status:'confirmed',visit_outcome:null,outcome_note:null,followup_state:'none',followup_note:null,visit_result:'scheduled',has_replacement:false,version:1};
+ const fetch=backend((path,init)=>{
+  if(init?.method==='POST'&&String(path).includes('/outcome')){record={...record,visit_outcome:'completed',outcome_note:'Toured twice.',version:2,visit_result:'completed'};return Response.json({record});}
+  return Response.json({record});
+ });
+ render(<CrmRecords entity="appointments" id={ID}/>);
+ expect(await screen.findByText(/Visit result: scheduled/)).toBeVisible();
+ await user.selectOptions(screen.getByLabelText('Visit outcome'),'completed');
+ await user.type(screen.getByLabelText('Outcome note'),'Toured twice.');
+ await user.type(screen.getByLabelText('Outcome reason'),'Fictional visit');
+ await user.click(screen.getByRole('button',{name:'Record outcome'}));
+ await waitFor(()=>expect(screen.getByText(/Visit result: completed/)).toBeVisible());
+ expect(screen.queryByLabelText('Visit outcome')).not.toBeInTheDocument();
+ const request=fetch.mock.calls.find(([url,init])=>init?.method==='POST'&&String(url).includes('/outcome'));
+ expect(JSON.parse(String(request![1]?.body))).toMatchObject({expected_version:1,visit_outcome:'completed',outcome_note:'Toured twice.',reason:'Fictional visit'});
+});
+
+it('saves visit follow-up transitions with its expected version',async()=>{
+ const user=userEvent.setup();let record={id:ID,status:'confirmed',visit_outcome:null,followup_state:'none',followup_note:null,visit_result:'scheduled',version:1};
+ const fetch=backend((path,init)=>{
+  if(init?.method==='POST'&&String(path).includes('/outcome')){const body=JSON.parse(String(init.body));record={...record,followup_state:body.followup_state??record.followup_state,followup_note:body.followup_note??record.followup_note,version:2};return Response.json({record});}
+  return Response.json({record});
+ });
+ render(<CrmRecords entity="appointments" id={ID}/>);
+ await user.selectOptions(await screen.findByLabelText('Follow-up state'),'pending');
+ await user.type(screen.getByLabelText('Follow-up note'),'Send sheet.');
+ await user.type(screen.getByLabelText('Follow-up reason'),'Fictional next action');
+ await user.click(screen.getByRole('button',{name:'Save follow-up'}));
+ await waitFor(()=>expect(screen.getByText(/Follow-up: pending/)).toBeVisible());
+ const request=fetch.mock.calls.find(([,init])=>init?.method==='POST');
+ expect(JSON.parse(String(request![1]?.body))).toMatchObject({expected_version:1,followup_state:'pending',followup_note:'Send sheet.'});
+});
+
+it('hides reschedule and cancel after an outcome and offers fresh rebooking after no-show',async()=>{
+ backend(()=>Response.json({record:{id:ID,lead_id:ID,status:'confirmed',visit_outcome:'no_show',followup_state:'none',visit_result:'no_show',version:2}}));
+ render(<CrmRecords entity="appointments" id={ID}/>);
+ await screen.findByText(/Visit result: no_show/);
+ expect(screen.queryByRole('link',{name:'Reschedule visit'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Confirm cancellation'})).not.toBeInTheDocument();
+ expect(screen.getByRole('link',{name:'Book follow-up visit'})).toHaveAttribute('href','/appointments/new?lead_id='+ID);
+ expect(screen.queryByLabelText('Visit outcome')).not.toBeInTheDocument();
+ expect(screen.getByLabelText('Follow-up state')).toBeVisible();
+});
+
+it('filters the appointment list by recorded outcome and shows derived results',async()=>{
+ const user=userEvent.setup();
+ const rows=[{id:ID,lead_name:'Fictional CRM Lead',property_title:'Demo home',starts_at:'2034-01-02T10:00:00Z',status:'confirmed',visit_result:'completed'}];
+ const fetch=backend(()=>Response.json({items:rows,total:1,page:1,page_size:20}));
+ render(<CrmRecords entity="appointments"/>);
+ expect(await screen.findByText('completed')).toBeVisible();
+ await user.selectOptions(screen.getByLabelText('Filter'),'completed');
+ await waitFor(()=>expect(fetch.mock.calls.some(([path])=>String(path).includes('outcome=completed'))).toBe(true));
+});
+
 it('saves a partial lead with explicit null requirements rather than zero defaults',async()=>{
  const user=userEvent.setup();const fetch=backend();render(<RecordForm entity="leads"/>);
  await user.type(screen.getByLabelText('Name'),'Fictional incomplete buyer');await user.type(screen.getByLabelText('Email'),'incomplete@example.invalid');

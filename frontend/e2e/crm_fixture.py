@@ -10,7 +10,7 @@ if sys.argv[1]=='plan':
         start=conn.execute("SELECT greatest(coalesce(max(ends_at),clock_timestamp()),clock_timestamp())+interval '7 days' FROM soloestate.visit_slots").fetchone()[0].replace(second=0,microsecond=0)
     local=lambda value:value.astimezone(timezone(timedelta(hours=5,minutes=30))).strftime('%Y-%m-%dT%H:%M')
     prefix='BrowserCRM-'+str(uuid4())
-    print(json.dumps(dict(prefix=prefix,email=prefix.lower()+'@example.invalid',starts=[(start+timedelta(hours=i)).isoformat() for i in (0,2)],start_local=[local(start+timedelta(hours=i)) for i in (0,2)],end_local=[local(start+timedelta(hours=i,minutes=30)) for i in (0,2)])))
+    print(json.dumps(dict(prefix=prefix,email=prefix.lower()+'@example.invalid',starts=[(start+timedelta(hours=i)).isoformat() for i in (0,2,4,6)],start_local=[local(start+timedelta(hours=i)) for i in (0,2,4,6)],end_local=[local(start+timedelta(hours=i,minutes=30)) for i in (0,2,4,6)])))
 elif sys.argv[1]=='cleanup':
     data=json.loads(sys.argv[2]);prefix=data['prefix']
     assert prefix.startswith('BrowserCRM-') and len(prefix)==47

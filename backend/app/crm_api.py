@@ -65,9 +65,9 @@ def edit_property(identifier:UUID,body:s.PropertyUpdate,crm:CRM=Depends(service)
 
 
 @router.get('/appointments')
-def appointments(q:str=Query('',max_length=200),sort:str='starts_asc',page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),status:Literal['confirmed','cancelled']|None=None,period:Literal['upcoming','past']|None=None,lead_id:UUID|None=None,property_id:UUID|None=None,since:AwareDatetime|None=None,until:AwareDatetime|None=None,crm:CRM=Depends(service)):
+def appointments(q:str=Query('',max_length=200),sort:str='starts_asc',page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),status:Literal['confirmed','cancelled']|None=None,period:Literal['upcoming','past']|None=None,lead_id:UUID|None=None,property_id:UUID|None=None,since:AwareDatetime|None=None,until:AwareDatetime|None=None,outcome:Literal['completed','no_show']|None=None,crm:CRM=Depends(service)):
     if since and until and since>=until: raise CRMError('Invalid date range.',422)
-    return crm.listing('appointments',q=q,sort=sort,page=page,page_size=page_size,status=status,period=period,lead_id=lead_id,property_id=property_id,since=since,until=until)
+    return crm.listing('appointments',q=q,sort=sort,page=page,page_size=page_size,status=status,period=period,lead_id=lead_id,property_id=property_id,since=since,until=until,outcome=outcome)
 
 
 @router.get('/appointments/{identifier}')
@@ -76,6 +76,12 @@ def appointment(identifier:UUID,crm:CRM=Depends(service)): return crm.detail('ap
 
 @router.post('/appointments/{identifier}/cancel')
 def cancel(identifier:UUID,body:s.Cancel,crm:CRM=Depends(service)): return crm.cancel(identifier,body)
+
+
+@router.post('/appointments/{identifier}/outcome')
+def update_outcome(identifier:UUID,body:s.OutcomeUpdate,crm:CRM=Depends(service)):
+    from app.visits import record_outcome
+    return record_outcome(crm,identifier,body)
 
 
 @router.get('/visit-slots')

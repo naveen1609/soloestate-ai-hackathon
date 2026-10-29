@@ -1,5 +1,13 @@
 # Phase B4 verification
 
+## Independent closure verdict — Codex, 29 October 2026
+
+**PASS — B4 acceptance criteria met; ready to close.** This records the explicit verdict already delivered in the owner's conversation after the sequential-worker verification gap was closed; it is not a newly executed full-suite claim. Scope: the bounded B4 internal follow-up/task contract, including review invalidation, full revision snapshots/legacy compatibility, creation locks, owner authorization, idempotency and preservation of B1–B3 safeguards. The reviewed implementation is now checkpointed as **fc7d4a7**.
+
+Independent checks actually executed during the correction review: database-free `python -B -m pytest -q -p no:cacheprovider tests/test_followups.py tests/test_crm.py tests/test_journey.py tests/test_faq.py tests/test_conversation.py` gave **127 passed, 1 existing warning in 45.83s**. Frontend review attempts had timing failures (77 passed/3 timed out, then 79 passed/1 timed out with one worker); retain these failures as history. Muse subsequently executed the unchanged focused sequential-worker command with **80 passed in 26.58s** and full frontend sequential-worker command with **138 passed in 61.81s**, both exit 0. Codex verified those results were recorded in the repository and the fixes remained present; Codex did not independently rerun these final frontend, database or browser suites. Their execution provenance remains Muse's report below.
+
+Closure-record session: confirmed main/fc7d4a7, no backend/frontend/migration difference from that checkpoint, no staged changes and clean `git diff --check`; preserved all four inherited B5 planning-document edits. No tests were run solely for this documentation session. Known limits remain first-20 task/history views, single-owner authorization, API-enforced history immutability, five unexecuted dedicated-empty-database schema checks and no external delivery/background scheduling. B4 is closed for its bounded scope; B5 and the overall Phase B journey remain unimplemented.
+
 Implemented contract: owner-managed follow-up tasks as internal work tracking, with a validated status lifecycle, versioned content edits that invalidate pending review, CHECK-bound outcomes on terminal done, read-time overdue derivation, per-task history, and truthful non-delivery states. No scheduler, notification sender, channel, receipt, vector feature or autonomous behavior; the agent-run draft/approval flow and seven-tool registry are unchanged. [Approved B4 contract](phase-b-plan.md#b4-contract--approved-29-october-2026), [decisions](DECISIONS.md). Migration `0008_followup_tasks.sql` adds private RLS `followup_tasks`; migrations 0001–0007 and seed records are unchanged.
 
 ## Actual checks

@@ -179,3 +179,11 @@ class TaskUpdate(Versioned):
     status: Literal['open','in_progress','in_review','done','cancelled'] | None = None
     outcome: str | None = Field(default=None,max_length=2000)
     reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class OutcomeUpdate(Versioned):
+    visit_outcome: Literal['completed','no_show'] | None = None
+    outcome_note: str | None = Field(default=None,max_length=2000)
+    followup_state: Literal['none','pending','done'] | None = None
+    followup_note: str | None = Field(default=None,max_length=2000)
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")

@@ -6,7 +6,7 @@ export function permitted(method: string, path: string): boolean {
   if (path.startsWith('crm/')) {
     if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$|^crm/leads/${uuid}/(activities|matches)$|^crm/(faqs|conversations|followup-tasks)$|^crm/(faqs|conversations|followup-tasks)/${uuid}$`).test(path);
     if (method === 'PATCH') return new RegExp(`^crm/(leads|properties)/${uuid}$`).test(path);
-    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/(archive|journey|qualify)$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$|^crm/faqs$|^crm/faqs/${uuid}/(versions|archive)$|^crm/conversations$|^crm/conversations/${uuid}/(messages|draft|handoff|review)$|^crm/followup-tasks$|^crm/followup-tasks/${uuid}/update$`).test(path);
+    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/(archive|journey|qualify)$|^crm/appointments/${uuid}/(cancel|outcome)$|^crm/appointment-requests/${uuid}/(commit|reject)$|^crm/faqs$|^crm/faqs/${uuid}/(versions|archive)$|^crm/conversations$|^crm/conversations/${uuid}/(messages|draft|handoff|review)$|^crm/followup-tasks$|^crm/followup-tasks/${uuid}/update$`).test(path);
   }
   return method === "GET" ? new RegExp(`^(runs|approvals)(/${uuid})?$`).test(path) :
     method === "POST" && (path === "runs" || new RegExp(`^runs/${uuid}/resume$|^approvals/${uuid}/decision$`).test(path));
@@ -21,7 +21,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const crmQueries: Record<string,string[]> = {
     'crm/leads':['q','sort','page','page_size','status','archived'],
     'crm/properties':['q','sort','page','page_size','active','locality','bedrooms','min_price','max_price'],
-    'crm/appointments':['q','sort','page','page_size','status','period','lead_id','property_id','since','until'],
+    'crm/appointments':['q','sort','page','page_size','status','period','lead_id','property_id','since','until','outcome'],
     'crm/visit-slots':['since','until'],
     'crm/faqs':['q','scope','status','property_id','page','page_size'],
     'crm/conversations':['lead_id','status','page','page_size'],

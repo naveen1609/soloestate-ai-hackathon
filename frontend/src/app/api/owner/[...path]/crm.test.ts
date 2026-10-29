@@ -54,3 +54,12 @@ it('allows only explicit task list queries',async()=>{
  expect((await GET(request('crm/followup-tasks?sql=DROP','GET'),context)).status).toBe(400);
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+it.each([['POST','crm/appointments/'+ID+'/outcome']])('permits B5 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['PATCH','crm/appointments/'+ID+'/outcome'],['GET','crm/appointments/'+ID+'/outcome'],['POST','crm/appointments/'+ID],['POST','crm/appointments/'+ID+'/send'],['POST','crm/appointments/'+ID+'/deliver']])('rejects unregistered B5 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+it('allows only explicit appointment list queries',async()=>{
+ const fetch=vi.fn(async()=>Response.json({items:[],total:0}));vi.stubGlobal('fetch',fetch);
+ const context={params:Promise.resolve({path:['crm','appointments']})};
+ expect((await GET(request('crm/appointments?lead_id='+ID+'&outcome=completed','GET'),context)).status).toBe(200);
+ expect((await GET(request('crm/appointments?sql=DROP','GET'),context)).status).toBe(400);
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

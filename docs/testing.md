@@ -135,3 +135,18 @@ From backend:
 Apply additive migration 0008 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish.
 
 Frontend: followup-tasks.test.tsx, BFF allowlist cases pinning the four task paths and rejecting send/deliver shapes, and the expanded real CRM browser workflow. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Exact cleanup includes followup_tasks. Final evidence is in [phase-b4-verification.md](phase-b4-verification.md). No live model, scheduler, notification or external delivery is enabled by these commands.
+
+## B5 coverage and commands
+
+New backend files: test_visits.py and test_visits_database.py. They cover the five-state visit-result derivation with forward-only lineage, terminal completed/no-show recording on confirmed bookings, cancelled-row rejection, the follow-up graph with note rules and reopen, versioned/idempotent writes with exact replay and changed-payload conflicts, stale/missing/archived cases, legacy NULL rows with no implied attendance, before/after visit history with audit rollback, multi-replacement chains, no-show fresh rebooking, the outcome list filter, authorization and HTTP wiring, and an outcome-versus-cancel race with atomic rejection. Most new database fixtures roll back; the race test commits its fixtures on separate connections and deletes them by exact ID at teardown.
+
+From backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_visits.py tests/test_visits_database.py --run-integrity-db-tests
+.\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
+```
+
+Apply additive migration 0009 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish.
+
+Frontend: outcome/follow-up appointment UI cases in crm.test.tsx, BFF allowlist cases pinning the outcome path and query, and the expanded real CRM browser workflow (no-show with fresh rebook, reschedule lineage, completion with next action, history and filter checks, plus retained cancel coverage). Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Exact cleanup covers the additional fixture bookings, slots, activities and operations by lead. Final evidence is in [phase-b5-verification.md](phase-b5-verification.md). No live model, scheduler, notification or external delivery is enabled by these commands.
