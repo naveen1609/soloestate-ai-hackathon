@@ -67,7 +67,7 @@ Expected: **222 passed, 5 skipped** and no broken dependencies. The 5 remaining 
 .\.venv\Scripts\python.exe -m pytest -q -m tools_database --run-tool-db-tests
 ```
 
-Expected: **16 passed**. Run these tests sequentially, not with pytest-xdist. They require the current six migrations and a trusted database connection. They create uniquely named fictional contacts, inventory, future slots and runs inside transactions; simulate decisions only in the fixture; then roll back all changes. No customer messages are sent and no test booking is retained. These tests cover individual tool behavior and sequential contention; they do not establish full multi-process orchestration recovery or concurrent-owner approval behavior.
+Expected: **16 passed**. Run these tests sequentially, not with pytest-xdist. They require the current seven migrations and a trusted database connection. They create uniquely named fictional contacts, inventory, future slots and runs inside transactions; simulate decisions only in the fixture; then roll back all changes. No customer messages are sent and no test booking is retained. These tests cover individual tool behavior and sequential contention; they do not establish full multi-process orchestration recovery or concurrent-owner approval behavior.
 
 If anything fails, share the exact command and safe test failure/error output. Never share `.env`, connection strings, API keys, or raw driver debug logs.
 

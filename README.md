@@ -50,7 +50,7 @@ Run each command separately and stop on a nonzero exit code:
 .\.venv\Scripts\python.exe -m scripts.demo_preflight
 ```
 
-Expected: status ok, six migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
+Expected: status ok, seven migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
 
 Start the API and keep this terminal open:
 
@@ -151,4 +151,6 @@ Never share .env contents, API keys, cookies, login URLs or credential-bearing c
 
 B1 adds owner-managed journey/contact/handoff controls and activity history to the existing lead detail page. Apply the additive migration before restarting. No channels or delivery are enabled. See [B1 contract](docs/phase-b-plan.md#b1-contract), [roadmap](docs/ROADMAP.md), [decisions](docs/DECISIONS.md) and current [handoff](docs/HANDOFF.md).
 
-B2 adds incomplete lead requirements, purchase timeframe, explicit owner qualification/requalification and explained live property matching on existing records. Blank requirements remain unknown; matching does not book or grant contact permission. Apply migration 0006 before updated startup; no new secrets/dependencies or seed reset. See the [approved B2 contract](docs/phase-b-plan.md#b2-contract--approved-29-october-2026), [verification and walkthrough](docs/phase-b2-verification.md) and [current handoff](docs/HANDOFF.md). B3 remains unstarted.
+B2 adds incomplete lead requirements, purchase timeframe, explicit owner qualification/requalification and explained live property matching on existing records. Blank requirements remain unknown; matching does not book or grant contact permission. Apply migration 0006 before updated startup; no new secrets/dependencies or seed reset. See the [approved B2 contract](docs/phase-b-plan.md#b2-contract--approved-29-october-2026), [verification and walkthrough](docs/phase-b2-verification.md) and [current handoff](docs/HANDOFF.md).
+
+B3 adds owner-managed versioned FAQs with pinned citations and lead-linked simulated conversations with validated grounded answers, explicit unsupported handling, handoff and review. Apply migration 0007 before updated startup; no new secrets/dependencies or seed reset. Simulation is internal and fictional; no channels or delivery exist. See the [approved B3 contract](docs/phase-b-plan.md#b3-contract--approved-29-october-2026), [verification](docs/phase-b3-verification.md) and [current handoff](docs/HANDOFF.md). No later phase is authorized.

@@ -1,14 +1,16 @@
 # SoloEstate AI — project state
 
-Reviewed: **29 October 2026**, Asia/Kolkata. Source baseline: **main / caf4ad3** (`Dev: phase A implemented`). This is the capability/status index; [HANDOFF.md](HANDOFF.md) holds the changing work queue and Git snapshot. Reinspect both Git and source before editing.
+Reviewed: **29 October 2026**, Asia/Kolkata. Source baseline: **main / a2521ae** (`Complete CRM qualification and property matching`). This is the capability/status index; [HANDOFF.md](HANDOFF.md) holds the changing work queue and Git snapshot. Reinspect both Git and source before editing.
+
+Checkpoint update: the owner approved a local B3 checkpoint commit after independent frontend closure (72 focused tests passed). The checkpoint containing this note is based on a2521ae and includes the preserved B3 source, tests, additive migration and documentation. B4 is ready for scoped planning; implementation, push and deployment remain separately authorized actions. See the final B3 report section and handoff for evidence boundaries.
 
 ## Vision and delivery status
 
 SoloEstate AI is an **AI Business Operating System for a one-person real estate company**. The owner directs goals; Meta Muse Spark proposes validated plans and selects permitted tools; the backend executes real operations, observes results and reports persisted evidence. The intended longer-term journey includes contacts, qualification, properties, FAQs/conversations, tasks, follow-ups, visits, channel communication and policy-controlled specialized agents.
 
-- **Implemented:** initial phases 1–10 and **Phase A Core CRM and Appointment Management**, plus B1 journey/contact and the approved B2 qualification/matching increment (verified end to end on 29 October 2026).
-- **Not implemented:** Phase B beyond B2, customer conversation/FAQ/task modules, external delivery, background scheduling and an autonomous agent network.
-- **B1:** owner-authorized journey/contact controls on existing leads; see [contract](phase-b-plan.md#b1-contract). **B2:** owner-approved qualification/matching implementation, verified end to end including browser (7 passed / 1 opt-in skip); see [B2 report](phase-b2-verification.md). B3 and later remain unstarted.
+- **Implemented:** initial phases 1–10 and **Phase A Core CRM and Appointment Management**, plus B1 journey/contact, the approved B2 qualification/matching increment and the approved B3 FAQ/conversation increment (all verified end to end on 29 October 2026).
+- **Not implemented:** Phase B beyond B3, customer task modules, external delivery, background scheduling and an autonomous agent network.
+- **B1:** owner-authorized journey/contact controls on existing leads; see [contract](phase-b-plan.md#b1-contract). **B2:** owner-approved qualification/matching implementation, verified end to end including browser (7 passed / 1 opt-in skip); see [B2 report](phase-b2-verification.md). **B3:** owner-approved FAQ/conversation implementation, verified end to end including browser (7 passed / 1 opt-in skip); see [B3 report](phase-b3-verification.md). No later phase is authorized.
 
 ## Canonical documentation — reuse, do not duplicate
 
@@ -19,7 +21,8 @@ SoloEstate AI is an **AI Business Operating System for a one-person real estate 
 | Tables, migrations, PostgreSQL/TLS and privacy | [database.md](database.md) |
 | Executed Phase A verification | [phase-a-verification.md](phase-a-verification.md) |
 | B1 verification | [phase-b1-verification.md](phase-b1-verification.md) |
-| Current B2 verification | [phase-b2-verification.md](phase-b2-verification.md) |
+| B2 verification | [phase-b2-verification.md](phase-b2-verification.md) |
+| Current B3 verification | [phase-b3-verification.md](phase-b3-verification.md) |
 | Test commands, side effects and coverage | [testing.md](testing.md) |
 | Meta integration and data sent to the provider | [model-usage.md](model-usage.md) |
 | Seven tool contracts | [tools.md](tools.md) |
@@ -43,7 +46,7 @@ Historical phase verification files retain their original results. If a count or
 
 ## Database and operation invariants
 
-There are **six immutable migrations**: `0001_initial.sql`, `0002_execution_integrity.sql`, `0003_dashboard_sessions.sql`, `0004_core_crm.sql`, `0005_customer_journey.sql`, `0006_lead_qualification.sql`. The runner in `backend/app/migrations.py` also creates the setup ledgers. The **14 private RLS-enabled tables** are listed with their roles in [database.md](database.md#tables-and-invariants); `crm_operations` is the Phase A audit/idempotency addition. Existing `bookings` and `visit_slots` are the appointment model; there is no duplicate appointments table.
+There are **seven immutable migrations**: `0001_initial.sql`, `0002_execution_integrity.sql`, `0003_dashboard_sessions.sql`, `0004_core_crm.sql`, `0005_customer_journey.sql`, `0006_lead_qualification.sql`, `0007_conversation_foundation.sql`. The runner in `backend/app/migrations.py` also creates the setup ledgers. The **18 private RLS-enabled tables** are listed with their roles in [database.md](database.md#tables-and-invariants); `crm_operations` is the Phase A audit/idempotency addition. Existing `bookings` and `visit_slots` are the appointment model; there is no duplicate appointments table.
 
 - Browser access is through the backend. SQL values are parameterized and handlers/identifiers are fixed. The current local database role is trusted; public deployment needs restricted privileges and production identity/HTTPS work.
 - Sign-in tickets are hashed, single-use and expire after two minutes; opaque sessions expire after eight hours and can be revoked. Issuing a login link writes a session ticket and is not a read-only inspection action.
@@ -73,3 +76,5 @@ Never record secret values, DSNs, session cookies or login fragments here. No ex
 B1 adds `backend/app/journey.py`, owner POST lead journey / GET lead activities APIs, `lead-journey.tsx` on the existing detail route, and opt-out/handoff checks in registered tools and owner decisions. New private table: `lead_activities`. State transitions, preferences, permission and human handoff stay independent of lead/booking status. See [decisions](DECISIONS.md) and [roadmap](ROADMAP.md). Current executed results are recorded in HANDOFF; historical Phase A results remain unchanged.
 
 B2 reuses canonical lead requirements with genuine NULL answers, adds purchase_timeframe/current-review fingerprint, derives matching/qualification readiness and logs requirement/review evidence to existing tables. Owner POST lead qualify and GET lead matches routes use fixed authenticated BFF paths; the existing get_property_matches tool shares the same matcher. No new model mutation authority. Matching snapshots carry versions, criteria, time and requested/actual checks; no delivery or availability certification is implied. Final B2 executed evidence, including the browser run (7 passed / 1 skipped, 6.9m, exit 0), is in its scoped report; B1 results remain historical.
+
+B3 adds versioned FAQs (`faq.py`), lead-linked simulated conversations (`conversation.py`), 11 owner API routes, an FAQ manager and lead-detail conversation UI, and regression coverage across backend, frontend and browser. Answers cite pinned immutable FAQ versions or persist as unsupported; handoff/review gates drafting; the seven-tool registry is unchanged and nothing is delivered. Final B3 executed evidence, including the browser run (7 passed / 1 skipped, 9.0m, exit 0), is in its scoped report; B1/B2 results remain historical. A stale-citation correction revalidates cited-version freshness at commit time under row locks (sources revised or archived during inference persist as unsupported); focused suites 89 passed, pending independent review; see the [B3 report](phase-b3-verification.md#stale-citation-correction--29-october-2026). The focused-frontend regression gap is since closed with a test-only per-assertion wait budget (focused 72/72 in three consecutive runs, full frontend 120/120, lint/typecheck clean, no application change); see the [closure section](phase-b3-verification.md#frontend-regression-closure--29-october-2026).

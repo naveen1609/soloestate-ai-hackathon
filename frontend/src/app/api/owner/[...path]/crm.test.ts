@@ -25,6 +25,19 @@ it.each([['PATCH','crm/leads/'+ID+'/journey'],['POST','crm/leads/'+ID+'/activiti
 
 it.each([['GET','crm/leads/'+ID+'/matches'],['POST','crm/leads/'+ID+'/qualify']])('permits B2 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
 it.each([['PATCH','crm/leads/'+ID+'/qualify'],['POST','crm/leads/'+ID+'/matches'],['POST','crm/qualify_all']])('rejects unregistered B2 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+
+
+it.each([['GET','crm/faqs'],['GET','crm/faqs/'+ID],['POST','crm/faqs'],['POST','crm/faqs/'+ID+'/versions'],['POST','crm/faqs/'+ID+'/archive'],['GET','crm/conversations'],['GET','crm/conversations/'+ID],['POST','crm/conversations'],['POST','crm/conversations/'+ID+'/messages'],['POST','crm/conversations/'+ID+'/draft'],['POST','crm/conversations/'+ID+'/handoff'],['POST','crm/conversations/'+ID+'/review']])('permits B3 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['PATCH','crm/faqs/'+ID],['DELETE','crm/faqs/'+ID],['POST','crm/faqs/'+ID],['GET','crm/faqs/'+ID+'/versions'],['PATCH','crm/conversations/'+ID+'/messages'],['DELETE','crm/conversations/'+ID],['POST','crm/conversations/'+ID],['GET','crm/conversations/'+ID+'/draft'],['POST','crm/answer_all']])('rejects unregistered B3 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+it('allows only explicit faq and conversation queries',async()=>{
+ const fetch=vi.fn(async()=>Response.json({items:[],total:0}));vi.stubGlobal('fetch',fetch);
+ const faqs={params:Promise.resolve({path:['crm','faqs']})};const convos={params:Promise.resolve({path:['crm','conversations']})};
+ expect((await GET(request('crm/faqs?scope=business&status=active','GET'),faqs)).status).toBe(200);
+ expect((await GET(request('crm/faqs?sql=DROP','GET'),faqs)).status).toBe(400);
+ expect((await GET(request('crm/conversations?lead_id='+ID,'GET'),convos)).status).toBe(200);
+ expect((await GET(request('crm/conversations?debug=1','GET'),convos)).status).toBe(400);
+ expect(fetch).toHaveBeenCalledTimes(2);
+});
 it('allows only the explicit match limit query',async()=>{
  const fetch=vi.fn(async()=>Response.json({matches:[]}));vi.stubGlobal('fetch',fetch);
  const context={params:Promise.resolve({path:['crm','leads',ID,'matches']})};

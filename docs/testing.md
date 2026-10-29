@@ -117,6 +117,6 @@ From backend:
 .\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
 ```
 
-Apply additive migration 0006 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently: failure-injection fixtures take transactional table locks. Run the browser suite after backend mutation suites finish.
+Apply additive migration 0007 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently: failure-injection fixtures take transactional table locks. Run the browser suite after backend mutation suites finish.
 
 Frontend: lead-qualification.test.tsx, existing CRM/BFF regressions and the expanded real CRM browser workflow. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Fixtures remain fictional and exact cleanup includes lead_activities. Final pass/skip/warning/duration evidence is in [phase-b2-verification.md](phase-b2-verification.md); earlier counts above are historical. No live model or external delivery is enabled by these commands.

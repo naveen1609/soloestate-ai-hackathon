@@ -44,9 +44,9 @@ Stop at a nonzero exit code and resolve it before running the next command. Ever
 
 ```json
 {"status":"ok","connected":true}
-{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql","0004_core_crm.sql","0005_customer_journey.sql","0006_lead_qualification.sql"]}
+{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql","0004_core_crm.sql","0005_customer_journey.sql","0006_lead_qualification.sql","0007_conversation_foundation.sql"]}
 {"status":"ok","seeded":true}
-{"status":"ok","migrations":6,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
+{"status":"ok","migrations":7,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
 ```
 
 Repeat `migrate`, `seed`, and `verify` to check repeatability. A repeated migration returns `applied: []`; seeds do not duplicate rows or overwrite existing edits. Missing seed IDs are restored when seeding again. The verification counts exact fictional IDs; it is not a full checksum of current business records.
@@ -61,6 +61,10 @@ Use the repository runner as the migration source of truth. This is a `supabase/
 | --- | --- |
 | `leads` | Fictional contacts, INR budget, bedrooms, legacy status; B1 separate journey, contact preference/permission and handoff state |
 | `lead_activities` | B1 owner-only before/after state, reason, timestamp and deferred CRM operation reference; RLS, no browser policy |
+| `faqs` | B3 business/property scope, status, current version; reuses the version trigger |
+| `faq_versions` | B3 immutable question/answer rows keyed by FAQ and version; deferred CRM operation reference |
+| `conversations` | B3 lead link, optional property context, independent status/handoff state; reuses the version trigger |
+| `conversation_messages` | B3 append-only role/body rows with grounding state, pinned citations and deferred operation reference |
 | `properties` | Fictional inventory with positive INR prices and bedrooms; active flag |
 | `visit_slots` | Owner's exact appointment windows in UTC; valid time range and no overlaps |
 | `runs` | Goal, request idempotency key, state, structured plan and outcome JSON objects |
@@ -82,7 +86,7 @@ Owner authentication, immutable snapshots, version/hash binding, approval transi
 ## Privacy and access
 
 - `soloestate` is a private schema. Leave it out of Supabase's exposed Data API schemas.
-- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all fourteen tables with no browser access policies. Newly created schema defaults must remain private.
+- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all eighteen tables with no browser access policies. Newly created schema defaults must remain private.
 - No anon/authenticated role grants, browser Supabase client, public database endpoint, or service-role API key is added.
 - Database owners bypass RLS. RLS here is an additional browser-access barrier, not owner authorization or multi-tenancy. The backend is the trusted boundary.
 - Restrict project access, database network access, and deployment secrets appropriately. Never log DSNs or share certificate private keys (the downloaded server CA certificate is public).
@@ -140,3 +144,7 @@ Migration `0005_customer_journey.sql` adds separate journey/contact/handoff colu
 Migration 0006_lead_qualification.sql expands nullability on the original lead budget/locality/bedroom columns, adds nullable purchase_timeframe and qualification_fingerprint, and enforces a nonnegative ceiling independently when the floor is unknown. Existing nonnegative/order/nonempty/positive-bedroom checks still govern supplied values. No new table, duplicate profile, record rewrite or seed change; there remain fourteen private RLS tables. Existing timeframe/review values are unknown, not backfilled claims.
 
 The server validates finite two-decimal INR amounts, bounded nonempty localities and strict 1–30 bedrooms. NULL represents an unanswered question; explicit no_fixed_deadline is a known timeframe answer. A positive ceiling is needed for readiness. Backend-owned fingerprints reference canonical requirement facts; requirement edits clear current review and record history atomically. No API accepts a client fingerprint. Migrations 0001–0005 remain immutable. [Contract](phase-b-plan.md#b2-contract--approved-29-october-2026), [evidence](phase-b2-verification.md).
+
+## B3 conversation schema
+
+Migration `0007_conversation_foundation.sql` adds private RLS `faqs`, `faq_versions`, `conversations` and `conversation_messages` (eighteen tables including ledgers) and attaches the existing version trigger to the two mutable tables. FAQ versions are append-only with a current pointer; archiving only removes a FAQ from retrieval. Messages store role, grounding state, pinned citations and model provenance with no update path. Conversation lifecycle entries reuse `lead_activities` snapshots without touching lead handoff state. Migrations 0001–0006 remain immutable. [Contract](phase-b-plan.md#b3-contract--approved-29-october-2026), [evidence](phase-b3-verification.md).

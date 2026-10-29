@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import LeadJourney from './lead-journey';
 import LeadQualification from './lead-qualification';
+import ConversationPanel from './conversation-panel';
 import {FormEvent,useCallback,useEffect,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import CrmShell from './crm-shell';
@@ -58,6 +59,7 @@ function Detail({entity,id}:{entity:Entity;id:string}){
  {entity==='appointments'&&data.record.status==='confirmed'&&<form className="panel crm-section crm-form" onSubmit={e=>void cancel(e)}><h2>Cancel appointment</h2><p>This explicitly cancels the persisted visit and releases its slot. No customer message is sent.</p><label>Cancellation reason<input required maxLength={1000} value={reason} disabled={action.busy||action.pending} onChange={e=>setReason(e.target.value)}/></label><button className="button button-danger" disabled={action.busy}>{action.busy?'Confirming…':action.pending?'Retry saved cancellation':'Confirm cancellation'}</button></form>}
  {entity==='leads'&&<LeadQualification key={data.record.id} record={data.record} qualification={data.qualification} onSaved={leadSaved}/>}
  {entity==='leads'&&<LeadJourney record={data.record} onSaved={leadSaved}/>}
+ {entity==='leads'&&<ConversationPanel leadId={id}/>}
  {data.appointments&&<section className="panel crm-section"><h2>Related appointments</h2><p className="subtle">Latest 20 records. Use the appointments list for full search.</p>{data.appointments.length?data.appointments.map(row=><Link className="crm-row" href={'/appointments/'+row.id} key={row.id}>{date(row.starts_at)} · {text(row.status)} · {text(row.property_title)}</Link>):<p>No appointments yet.</p>}</section>}
  {data.followups&&<section className="panel crm-section"><h2>Follow-up evidence</h2><p className="subtle">Latest 20 draft records; delivery is not implemented.</p>{data.followups.length?data.followups.map(row=><p className="crm-row" key={row.id}>{text(row.subject)} · {text(row.status)} · v{text(row.version)}</p>):<p>No saved drafts.</p>}</section>}</>}</>;
 }

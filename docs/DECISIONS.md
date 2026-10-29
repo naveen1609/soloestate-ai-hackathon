@@ -28,4 +28,15 @@ Created on 28 October 2026 from inspected source and existing documentation, wit
 - Use a server-owned hash of canonical requirements as the current review marker. Semantic edits clear it, preserving old hash/facts in activity evidence; editing back does not silently requalify. Other B1 state changes do not invalidate the same requirements.
 - Reuse one matcher across owner API and existing typed tool. Return deterministic explanations/version/time and distinguish incomplete input from no inventory. Preserve score meaning as a rule-based rank.
 - Preserve omitted PATCH values; explicit NULL clears an answer. Bind provided-field identity for retries and retain the legacy digest fallback for pre-B2 lead-edit responses. Reuse transaction/version/audit machinery.
-- No new model mutation tool, autonomous qualification, delivery, background worker or B3 feature. [Contract](phase-b-plan.md#b2-contract--approved-29-october-2026), [verification](phase-b2-verification.md).
+- No new model mutation tool, autonomous qualification, delivery, background worker or B3 feature.
+
+## B3 decisions — owner approved 29 October 2026
+
+- Version FAQs as current-pointer plus immutable append-only versions; archiving hides from retrieval without deleting history. No update/delete API paths exist for versions or messages; allowlist tests pin their absence (DB-level forbid triggers would break exact fixture cleanup).
+- Pin exact cited versions on every grounded answer; derive superseded-citation flags at read time instead of rewriting history. A valid citation alone never proves semantic support: structural failures persist as unsupported with a reason code and fixed server text.
+- Keep conversation lifecycle (open/pending_owner/resolved) and handoff (none/requested/resolved) as independent axes mirroring B1 vocabulary. Drafting requires open status with no requested handoff; unsupported answers move to pending owner; owner review actions are explicit and reasoned.
+- Authorize retrieval to business FAQs plus the conversation's property context only, ranked deterministically by keyword overlap. Inference runs outside the database transaction; a replay pre-check and a re-validating commit phase prevent duplicate drafts and stale commits.
+- Accept reason fields only where they are persisted (handoff/review activity); FAQ content versions are their own audit trail. Simulation never alters contact permission, journey stage or lead handoff, and works regardless of B1 opt-out because nothing is contacted or delivered.
+- No new registry tool, channel, delivery, scheduler, vector search or autonomous behavior. [Contract](phase-b-plan.md#b3-contract--approved-29-october-2026), [verification](phase-b3-verification.md).
+- Grounding correction: assemble grounded bodies server-side from validated quotes; never persist model prose as grounded. Model confidence is metadata only. Residual relevance limits are documented, not claimed away.
+- Stale-citation correction: revalidate cited-version freshness, active status and authorization inside the draft-commit transaction under `FOR SHARE` row locks, so a source revised or archived during inference persists as unsupported instead of grounded.

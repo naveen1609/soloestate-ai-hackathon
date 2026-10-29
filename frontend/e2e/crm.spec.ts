@@ -15,8 +15,8 @@ async function signIn(page:Page){
 
 test('owner CRM creates, edits, searches, books, reschedules, cancels and archives real fictional records',async({page})=>{
  test.setTimeout(600_000);
- const data=JSON.parse(python('crm_fixture','plan')) as {prefix:string;email:string;starts:string[];start_local:string[];end_local:string[];slot_ids:string[]};
- data.slot_ids=[];
+ const data=JSON.parse(python('crm_fixture','plan')) as {prefix:string;email:string;starts:string[];start_local:string[];end_local:string[];slot_ids:string[];faq_ids:string[]};
+ data.slot_ids=[];data.faq_ids=[];
  async function createSlot(index:number){
   await page.getByLabel('Slot start (local time)').fill(data.start_local[index]);await page.getByLabel('Slot end (local time)').fill(data.end_local[index]);
   const pending=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/visit-slots')&&r.request().method()==='POST');
@@ -67,6 +67,17 @@ test('owner CRM creates, edits, searches, books, reschedules, cancels and archiv
   await page.getByRole('button',{name:'Check property matches',exact:true}).click();await expect(page.getByRole('link',{name:data.prefix,exact:true})).toBeVisible();
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.setViewportSize({width:1440,height:1000});
   console.log('B2: partial answers, matching, explicit review and requalification persisted');
+ // B3 authors versioned FAQs and simulates a lead-linked conversation.
+ await page.goto('/faqs');await page.getByLabel('FAQ question',{exact:true}).fill(data.prefix+' buyer fee policy');await page.getByLabel('FAQ answer',{exact:true}).fill('No buyer fee applies for '+data.prefix+' listings.');await page.getByRole('button',{name:'Save FAQ',exact:true}).click();await expect(page.getByRole('link',{name:data.prefix+' buyer fee policy · business · v1 · active',exact:true})).toBeVisible();
+ await page.getByRole('link',{name:data.prefix+' buyer fee policy · business · v1 · active',exact:true}).click();await expect(page).toHaveURL(/\/faqs\/[0-9a-f-]{36}$/);const faqId=page.url().split('/').at(-1)!;data.faq_ids.push(faqId);
+ await expect(page.getByText(/v1 · current/)).toBeVisible();
+ await page.getByLabel('FAQ answer',{exact:true}).fill('No buyer fee applies for '+data.prefix+' listings. Updated.');await page.getByRole('button',{name:'Save new version',exact:true}).click();await expect(page.getByText(/v2 · current/)).toBeVisible();
+ await page.goto(leadUrl);await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect(page.getByText('Status: open · Handoff: none',{exact:true})).toBeVisible();
+ await page.getByLabel('Simulated customer message',{exact:true}).fill('Is there a buyer fee on this listing?');await page.getByRole('button',{name:'Send simulated message',exact:true}).click();await expect(page.getByText('Is there a buyer fee on this listing?')).toBeVisible();
+ await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional B3 handoff');await page.getByRole('button',{name:'Request handoff',exact:true}).click();await expect(page.getByText('Drafting blocked: handoff requested.')).toBeVisible();await expect(page.getByRole('button',{name:'Draft answer',exact:true})).toBeDisabled();
+ await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional B3 resolution');await page.getByRole('button',{name:'Resolve handoff',exact:true}).click();await expect(page.getByText('Status: open · Handoff: resolved',{exact:true})).toBeVisible();
+ await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional B3 close');await page.getByRole('button',{name:'Resolve conversation',exact:true}).click();await expect(page.getByText('Status: resolved · Handoff: resolved',{exact:true})).toBeVisible();
+ console.log('B3: versioned FAQs and simulated conversation persisted');
   await page.goto('/appointments/new?lead_id='+leadId);await page.getByRole('combobox',{name:'Property',exact:true}).selectOption(propertyId);
   await createSlot(0);
   await page.getByRole('button',{name:'Prepare owner review',exact:true}).click();await expect(page.getByRole('heading',{name:'Review appointment request'})).toBeVisible();

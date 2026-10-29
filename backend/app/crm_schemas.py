@@ -112,3 +112,50 @@ class Cancel(Versioned):
 
 class Qualify(Versioned):
     reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class FaqCreate(Write):
+    scope: Literal['business','property']
+    property_id: UUID | None = None
+    question: str = Field(min_length=1,max_length=500,pattern=r"\S")
+    answer: str = Field(min_length=1,max_length=5000,pattern=r"\S")
+
+    @model_validator(mode='after')
+    def scope_property(self):
+        if (self.scope=='property')==(self.property_id is None):
+            raise ValueError('Property FAQs require a property; business FAQs forbid one')
+        return self
+
+
+class FaqVersion(Versioned):
+    question: str = Field(min_length=1,max_length=500,pattern=r"\S")
+    answer: str = Field(min_length=1,max_length=5000,pattern=r"\S")
+
+
+class FaqArchive(Versioned):
+    archived: bool = Field(strict=True)
+
+
+class ConversationOpen(Write):
+    lead_id: UUID
+    property_id: UUID | None = None
+
+
+class MessageAppend(Versioned):
+    role: Literal['customer','owner']
+    body: str = Field(min_length=1,max_length=5000,pattern=r"\S")
+    supersedes_message_id: UUID | None = None
+
+
+class DraftRequest(Versioned):
+    message_id: UUID
+
+
+class HandoffUpdate(Versioned):
+    action: Literal['request','resolve']
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class ReviewUpdate(Versioned):
+    action: Literal['acknowledge','resolve','reopen']
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")

@@ -132,3 +132,78 @@ def matches(identifier:UUID,limit:int=Query(5,ge=1,le=20),crm:CRM=Depends(servic
             lead=cur.execute('SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE',(identifier,)).fetchone()
             if lead is None: raise CRMError('Active lead not found.',404)
             return property_matches(cur,lead,limit).model_dump(mode='json')
+
+
+@router.post('/faqs')
+def create_faq(body:s.FaqCreate,crm:CRM=Depends(service)):
+    from app.faq import create
+    return create(crm,body)
+
+
+@router.get('/faqs')
+def faqs(scope:Literal['business','property']|None=None,property_id:UUID|None=None,status:Literal['active','archived']|None=None,q:str=Query('',max_length=200),page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.faq import listing
+    return listing(crm,scope=scope,property_id=property_id,status=status,q=q,page=page,page_size=page_size)
+
+
+@router.get('/faqs/{identifier}')
+def faq_detail(identifier:UUID,crm:CRM=Depends(service)):
+    from app.faq import detail
+    return detail(crm,identifier)
+
+
+@router.post('/faqs/{identifier}/versions')
+def faq_version(identifier:UUID,body:s.FaqVersion,crm:CRM=Depends(service)):
+    from app.faq import new_version
+    return new_version(crm,identifier,body)
+
+
+@router.post('/faqs/{identifier}/archive')
+def faq_archive(identifier:UUID,body:s.FaqArchive,crm:CRM=Depends(service)):
+    from app.faq import archive
+    return archive(crm,identifier,body)
+
+
+@router.post('/conversations')
+def create_conversation(body:s.ConversationOpen,crm:CRM=Depends(service)):
+    from app.conversation import open_conversation
+    return open_conversation(crm,body)
+
+
+@router.get('/conversations')
+def conversations(lead_id:UUID|None=None,status:Literal['open','pending_owner','resolved']|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.conversation import listing
+    return listing(crm,lead_id=lead_id,status=status,page=page,page_size=page_size)
+
+
+@router.get('/conversations/{identifier}')
+def conversation_detail(identifier:UUID,crm:CRM=Depends(service)):
+    from app.conversation import detail
+    return detail(crm,identifier)
+
+
+@router.post('/conversations/{identifier}/messages')
+def append_message(identifier:UUID,body:s.MessageAppend,crm:CRM=Depends(service)):
+    from app.conversation import append
+    return append(crm,identifier,body)
+
+
+@router.post('/conversations/{identifier}/draft')
+async def draft_response(identifier:UUID,body:s.DraftRequest,crm:CRM=Depends(service)):
+    from app.config import Settings
+    from app.conversation import draft
+    from app.services.meta_model import MetaModelService
+    async with MetaModelService(Settings()) as model:
+        return await draft(crm,identifier,body,model)
+
+
+@router.post('/conversations/{identifier}/handoff')
+def update_handoff(identifier:UUID,body:s.HandoffUpdate,crm:CRM=Depends(service)):
+    from app.conversation import handoff
+    return handoff(crm,identifier,body)
+
+
+@router.post('/conversations/{identifier}/review')
+def review_conversation(identifier:UUID,body:s.ReviewUpdate,crm:CRM=Depends(service)):
+    from app.conversation import review
+    return review(crm,identifier,body)
