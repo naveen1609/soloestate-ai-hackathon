@@ -120,3 +120,18 @@ From backend:
 Apply additive migration 0007 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently: failure-injection fixtures take transactional table locks. Run the browser suite after backend mutation suites finish.
 
 Frontend: lead-qualification.test.tsx, existing CRM/BFF regressions and the expanded real CRM browser workflow. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Fixtures remain fictional and exact cleanup includes lead_activities. Final pass/skip/warning/duration evidence is in [phase-b2-verification.md](phase-b2-verification.md); earlier counts above are historical. No live model or external delivery is enabled by these commands.
+
+## B4 coverage and commands
+
+New backend files: test_followups.py and test_followups_database.py. They cover task schemas, the transition graph with review invalidation, read-time overdue derivation, versioned/idempotent writes with explicit-null semantics, outcome rules with terminal done, archived-lead blocks with opt-out/handoff independence, per-task history, authorization and HTTP wiring. Most new database fixtures roll back; the two creation/concurrency race tests commit their lead/property fixtures on separate connections and delete them by exact ID at teardown.
+
+From backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_followups.py tests/test_followups_database.py --run-integrity-db-tests
+.\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
+```
+
+Apply additive migration 0008 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish.
+
+Frontend: followup-tasks.test.tsx, BFF allowlist cases pinning the four task paths and rejecting send/deliver shapes, and the expanded real CRM browser workflow. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Exact cleanup includes followup_tasks. Final evidence is in [phase-b4-verification.md](phase-b4-verification.md). No live model, scheduler, notification or external delivery is enabled by these commands.

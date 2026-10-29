@@ -44,3 +44,13 @@ it('allows only the explicit match limit query',async()=>{
  expect((await GET(request('crm/leads/'+ID+'/matches?limit=5','GET'),context)).status).toBe(200);
  expect((await GET(request('crm/leads/'+ID+'/matches?override_budget=1','GET'),context)).status).toBe(400);
 });
+
+it.each([['GET','crm/followup-tasks'],['GET','crm/followup-tasks/'+ID],['POST','crm/followup-tasks'],['POST','crm/followup-tasks/'+ID+'/update']])('permits B4 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['PATCH','crm/followup-tasks/'+ID],['DELETE','crm/followup-tasks/'+ID],['POST','crm/followup-tasks/'+ID],['GET','crm/followup-tasks/'+ID+'/update'],['POST','crm/followup-tasks/'+ID+'/send'],['POST','crm/followup-tasks/'+ID+'/deliver']])('rejects unregistered B4 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+it('allows only explicit task list queries',async()=>{
+ const fetch=vi.fn(async()=>Response.json({items:[],total:0}));vi.stubGlobal('fetch',fetch);
+ const context={params:Promise.resolve({path:['crm','followup-tasks']})};
+ expect((await GET(request('crm/followup-tasks?lead_id='+ID+'&status=open','GET'),context)).status).toBe(200);
+ expect((await GET(request('crm/followup-tasks?sql=DROP','GET'),context)).status).toBe(400);
+ expect(fetch).toHaveBeenCalledTimes(1);
+});

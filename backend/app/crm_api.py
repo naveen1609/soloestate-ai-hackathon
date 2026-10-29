@@ -207,3 +207,27 @@ def update_handoff(identifier:UUID,body:s.HandoffUpdate,crm:CRM=Depends(service)
 def review_conversation(identifier:UUID,body:s.ReviewUpdate,crm:CRM=Depends(service)):
     from app.conversation import review
     return review(crm,identifier,body)
+
+
+@router.post('/followup-tasks')
+def create_task(body:s.TaskCreate,crm:CRM=Depends(service)):
+    from app.followups import create_task
+    return create_task(crm,body)
+
+
+@router.get('/followup-tasks')
+def tasks(lead_id:UUID|None=None,status:Literal['open','in_progress','in_review','done','cancelled']|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.followups import listing
+    return listing(crm,lead_id=lead_id,status=status,page=page,page_size=page_size)
+
+
+@router.get('/followup-tasks/{identifier}')
+def task_detail(identifier:UUID,crm:CRM=Depends(service)):
+    from app.followups import detail
+    return detail(crm,identifier)
+
+
+@router.post('/followup-tasks/{identifier}/update')
+def edit_task(identifier:UUID,body:s.TaskUpdate,crm:CRM=Depends(service)):
+    from app.followups import update_task
+    return update_task(crm,identifier,body)

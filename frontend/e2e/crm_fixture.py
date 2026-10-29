@@ -23,7 +23,8 @@ elif sys.argv[1]=='cleanup':
         faqs=[r[0] for r in conn.execute('SELECT DISTINCT f.id FROM soloestate.faqs f JOIN soloestate.faq_versions v ON v.faq_id=f.id WHERE f.id=ANY(%s::uuid[]) AND v.question LIKE %s',(data.get('faq_ids',[]),prefix+'%')).fetchall()]
         convos=[r[0] for r in conn.execute('SELECT id FROM soloestate.conversations WHERE lead_id=ANY(%s::uuid[])',(leads,)).fetchall()]
         msgs=[r[0] for r in conn.execute('SELECT id FROM soloestate.conversation_messages WHERE conversation_id=ANY(%s::uuid[])',(convos,)).fetchall()]
-        ids=leads+props+slots+runs+bookings+faqs+convos+msgs
+        tasks=[r[0] for r in conn.execute('SELECT id FROM soloestate.followup_tasks WHERE lead_id=ANY(%s::uuid[])',(leads,)).fetchall()]
+        ids=leads+props+slots+runs+bookings+faqs+convos+msgs+tasks
         # Exact fixture ownership: replacement bookings before originals for the self-FK.
         conn.execute('DELETE FROM soloestate.bookings WHERE lead_id=ANY(%s::uuid[]) AND replaces_booking_id IS NOT NULL',(leads,))
         conn.execute('DELETE FROM soloestate.bookings WHERE lead_id=ANY(%s::uuid[])',(leads,))
@@ -33,6 +34,7 @@ elif sys.argv[1]=='cleanup':
         conn.execute('DELETE FROM soloestate.runs WHERE id=ANY(%s::uuid[])',(runs,))
         conn.execute('DELETE FROM soloestate.conversation_messages WHERE id=ANY(%s::uuid[])',(msgs,))
         conn.execute('DELETE FROM soloestate.conversations WHERE id=ANY(%s::uuid[])',(convos,))
+        conn.execute('DELETE FROM soloestate.followup_tasks WHERE id=ANY(%s::uuid[])',(tasks,))
         conn.execute('DELETE FROM soloestate.faq_versions WHERE faq_id=ANY(%s::uuid[])',(faqs,))
         conn.execute('DELETE FROM soloestate.faqs WHERE id=ANY(%s::uuid[])',(faqs,))
         conn.execute('DELETE FROM soloestate.lead_activities WHERE lead_id=ANY(%s::uuid[])',(leads,))

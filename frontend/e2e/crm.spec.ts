@@ -78,6 +78,23 @@ test('owner CRM creates, edits, searches, books, reschedules, cancels and archiv
  await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional B3 resolution');await page.getByRole('button',{name:'Resolve handoff',exact:true}).click();await expect(page.getByText('Status: open · Handoff: resolved',{exact:true})).toBeVisible();
  await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional B3 close');await page.getByRole('button',{name:'Resolve conversation',exact:true}).click();await expect(page.getByText('Status: resolved · Handoff: resolved',{exact:true})).toBeVisible();
  console.log('B3: versioned FAQs and simulated conversation persisted');
+ // B4 manages an internal follow-up task lifecycle without delivering anything.
+ await page.getByLabel('Task title',{exact:true}).fill(data.prefix+' rate sheet call');
+ await page.getByLabel('Due date (UTC)',{exact:true}).fill('2034-06-01');
+ await page.getByRole('button',{name:'Create task',exact:true}).click();
+ await expect(page.getByRole('button',{name:/open · due 2034-06-01/})).toBeVisible();
+ await expect(page.getByText('Status: open',{exact:true})).toBeVisible();
+ await page.getByLabel('Change reason',{exact:true}).fill('Fictional B4 start');
+ await page.getByRole('button',{name:'Move to in progress',exact:true}).click();
+ await expect(page.getByText('Status: in_progress',{exact:true})).toBeVisible();
+ await page.getByLabel('Change reason',{exact:true}).fill('Fictional B4 review');
+ await page.getByRole('button',{name:'Move to in review',exact:true}).click();
+ await expect(page.getByText('Status: in_review',{exact:true})).toBeVisible();
+ await page.getByLabel('Completion outcome',{exact:true}).fill('Fictional B4 visit set');
+ await page.getByLabel('Change reason',{exact:true}).fill('Fictional B4 completion');
+ await page.getByRole('button',{name:'Move to done',exact:true}).click();
+ await expect(page.getByText('Status: done · Outcome: Fictional B4 visit set',{exact:true})).toBeVisible();
+ console.log('B4: follow-up task lifecycle persisted');
   await page.goto('/appointments/new?lead_id='+leadId);await page.getByRole('combobox',{name:'Property',exact:true}).selectOption(propertyId);
   await createSlot(0);
   await page.getByRole('button',{name:'Prepare owner review',exact:true}).click();await expect(page.getByRole('heading',{name:'Review appointment request'})).toBeVisible();

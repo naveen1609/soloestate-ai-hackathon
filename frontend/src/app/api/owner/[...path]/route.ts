@@ -4,9 +4,9 @@ import { baseUrl, body, clear, COOKIE, error, sameOrigin } from "../../../../lib
 const uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 export function permitted(method: string, path: string): boolean {
   if (path.startsWith('crm/')) {
-    if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$|^crm/leads/${uuid}/(activities|matches)$|^crm/(faqs|conversations)$|^crm/(faqs|conversations)/${uuid}$`).test(path);
+    if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$|^crm/leads/${uuid}/(activities|matches)$|^crm/(faqs|conversations|followup-tasks)$|^crm/(faqs|conversations|followup-tasks)/${uuid}$`).test(path);
     if (method === 'PATCH') return new RegExp(`^crm/(leads|properties)/${uuid}$`).test(path);
-    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/(archive|journey|qualify)$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$|^crm/faqs$|^crm/faqs/${uuid}/(versions|archive)$|^crm/conversations$|^crm/conversations/${uuid}/(messages|draft|handoff|review)$`).test(path);
+    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/(archive|journey|qualify)$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$|^crm/faqs$|^crm/faqs/${uuid}/(versions|archive)$|^crm/conversations$|^crm/conversations/${uuid}/(messages|draft|handoff|review)$|^crm/followup-tasks$|^crm/followup-tasks/${uuid}/update$`).test(path);
   }
   return method === "GET" ? new RegExp(`^(runs|approvals)(/${uuid})?$`).test(path) :
     method === "POST" && (path === "runs" || new RegExp(`^runs/${uuid}/resume$|^approvals/${uuid}/decision$`).test(path));
@@ -25,6 +25,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     'crm/visit-slots':['since','until'],
     'crm/faqs':['q','scope','status','property_id','page','page_size'],
     'crm/conversations':['lead_id','status','page','page_size'],
+    'crm/followup-tasks':['lead_id','status','page','page_size'],
   };
   const allowed = path === 'runs' ? ['request_key'] : crmQueries[path] ?? (new RegExp(`^crm/leads/${uuid}/activities$`).test(path) ? ['page','page_size'] : new RegExp(`^crm/leads/${uuid}/matches$`).test(path) ? ['limit'] : []);
   if ([...query.keys()].some(key => !allowed.includes(key) || query.getAll(key).length !== 1) || (query.get("request_key")?.length ?? 0) > 128 || query.toString().length > 4000) return error("Invalid query.", 400);

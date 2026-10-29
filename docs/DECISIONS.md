@@ -40,3 +40,11 @@ Created on 28 October 2026 from inspected source and existing documentation, wit
 - No new registry tool, channel, delivery, scheduler, vector search or autonomous behavior. [Contract](phase-b-plan.md#b3-contract--approved-29-october-2026), [verification](phase-b3-verification.md).
 - Grounding correction: assemble grounded bodies server-side from validated quotes; never persist model prose as grounded. Model confidence is metadata only. Residual relevance limits are documented, not claimed away.
 - Stale-citation correction: revalidate cited-version freshness, active status and authorization inside the draft-commit transaction under `FOR SHARE` row locks, so a source revised or archived during inference persists as unsupported instead of grounded.
+
+## B4 decisions — owner approved 29 October 2026
+
+- Keep owner-managed tasks in a new `followup_tasks` table rather than extending agent-run `followup_drafts`; run-bound drafts, approvals and their integrity triggers stay untouched.
+- Run content edits before status validation so an edit while in_review returns to in_progress first: reviewed completion always reflects the latest revision, and content plus approval cannot combine in one step. A request that changes content on an in_review task and explicitly targets in_review or done is rejected (not silently demoted); resubmission and completion each need a separate versioned operation. Done is terminal with a CHECK-bound outcome; cancelled reopens to open.
+- Record full backend-owned task snapshots (identity, relationships, content, due date, assignee, status, outcome, version) in before/after activity state, serialized with the shared encoder; older three-field snapshots stay readable and are never backfilled. Task creation share-locks its lead and property reads so concurrent archival or deactivation serializes instead of interleaving.
+- Derive overdue at read from due date versus current time; reminders are data only with no scheduler, sender or delivery integration. No sent/delivered state exists at any layer; the BFF allowlist pins the absence of send/deliver paths.
+- Treat tasks as internal owner work that ignores B1 opt-out/handoff without changing contact permission, while archived leads block mutations until restored. [Contract](phase-b-plan.md#b4-contract--approved-29-october-2026), [verification](phase-b4-verification.md).

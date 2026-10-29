@@ -65,6 +65,7 @@ Use the repository runner as the migration source of truth. This is a `supabase/
 | `faq_versions` | B3 immutable question/answer rows keyed by FAQ and version; deferred CRM operation reference |
 | `conversations` | B3 lead link, optional property context, independent status/handoff state; reuses the version trigger |
 | `conversation_messages` | B3 append-only role/body rows with grounding state, pinned citations and deferred operation reference |
+| `followup_tasks` | B4 owner-managed title/notes, due timestamp, assignee label, status lifecycle and outcome; reuses the version trigger |
 | `properties` | Fictional inventory with positive INR prices and bedrooms; active flag |
 | `visit_slots` | Owner's exact appointment windows in UTC; valid time range and no overlaps |
 | `runs` | Goal, request idempotency key, state, structured plan and outcome JSON objects |
@@ -148,3 +149,7 @@ The server validates finite two-decimal INR amounts, bounded nonempty localities
 ## B3 conversation schema
 
 Migration `0007_conversation_foundation.sql` adds private RLS `faqs`, `faq_versions`, `conversations` and `conversation_messages` (eighteen tables including ledgers) and attaches the existing version trigger to the two mutable tables. FAQ versions are append-only with a current pointer; archiving only removes a FAQ from retrieval. Messages store role, grounding state, pinned citations and model provenance with no update path. Conversation lifecycle entries reuse `lead_activities` snapshots without touching lead handoff state. Migrations 0001–0006 remain immutable. [Contract](phase-b-plan.md#b3-contract--approved-29-october-2026), [evidence](phase-b3-verification.md).
+
+## B4 task schema
+
+Migration `0008_followup_tasks.sql` adds private RLS `followup_tasks` (nineteen tables including ledgers) and attaches the existing version trigger. Tasks carry a lead link with optional property context, title/notes, an optional due timestamp, a free-text assignee label, a five-state lifecycle and an outcome that a CHECK binds to done status only. Overdue derives at read from due date versus current time. Task lifecycle entries reuse `lead_activities` snapshots without touching lead handoff state. Migrations 0001–0007 remain immutable. [Contract](phase-b-plan.md#b4-contract--approved-29-october-2026), [evidence](phase-b4-verification.md).

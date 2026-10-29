@@ -53,7 +53,7 @@ class CRM:
             return found(conn.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',(key,)).fetchone())[0]
 
     def mutate(self,action,request,work):
-        from app.crm_schemas import LeadCreate, LeadUpdate
+        from app.crm_schemas import LeadCreate, LeadUpdate, TaskUpdate
         data=request.model_dump(mode='json')
         # Omitting a PATCH field preserves it; explicit null clears it. Bind that distinction.
         legacy_digest=None
@@ -63,6 +63,8 @@ class CRM:
         if isinstance(request,LeadUpdate):
             if 'purchase_timeframe' not in request.model_fields_set:
                 legacy_digest=payload_hash(identity)
+            identity['provided_fields']=sorted(request.model_fields_set)
+        if isinstance(request,TaskUpdate):
             identity['provided_fields']=sorted(request.model_fields_set)
         digest=payload_hash(identity)
         try:

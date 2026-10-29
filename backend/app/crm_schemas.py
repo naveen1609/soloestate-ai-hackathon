@@ -159,3 +159,23 @@ class HandoffUpdate(Versioned):
 class ReviewUpdate(Versioned):
     action: Literal['acknowledge','resolve','reopen']
     reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class TaskCreate(Write):
+    lead_id: UUID
+    property_id: UUID | None = None
+    title: str = Field(min_length=1,max_length=200,pattern=r"\S")
+    notes: str = Field(default='',max_length=5000)
+    due_at: AwareDatetime | None = None
+    assignee: str = Field(default='owner',min_length=1,max_length=120,pattern=r"\S")
+
+
+class TaskUpdate(Versioned):
+    title: str | None = Field(default=None,min_length=1,max_length=200,pattern=r"\S")
+    notes: str | None = Field(default=None,max_length=5000)
+    due_at: AwareDatetime | None = None
+    assignee: str | None = Field(default=None,min_length=1,max_length=120,pattern=r"\S")
+    property_id: UUID | None = None
+    status: Literal['open','in_progress','in_review','done','cancelled'] | None = None
+    outcome: str | None = Field(default=None,max_length=2000)
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
