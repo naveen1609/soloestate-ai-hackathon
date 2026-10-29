@@ -4,7 +4,10 @@ import { useRef, useState } from 'react';
 
 export const RecordSchema=z.object({id:z.uuid()}).catchall(z.unknown());
 export type Row=z.infer<typeof RecordSchema>;
-export const DetailSchema=z.object({record:RecordSchema,appointments:z.array(RecordSchema).optional(),followups:z.array(RecordSchema).optional()});
+export const QualificationSchema=z.object({matching_ready:z.boolean(),qualification_ready:z.boolean(),matching_missing_fields:z.array(z.string()),missing_fields:z.array(z.string()),invalid_fields:z.array(z.string()),qualification_current:z.boolean(),needs_review:z.boolean()});
+export type Qualification=z.infer<typeof QualificationSchema>;
+export const MatchesSchema=z.object({lead_id:z.uuid(),lead_version:z.number().int(),checked_at:z.string(),matching_ready:z.boolean(),missing_fields:z.array(z.string()),invalid_fields:z.array(z.string()),criteria_snapshot:z.record(z.string(),z.unknown()),truncated:z.boolean(),criteria:z.string(),matches:z.array(RecordSchema.extend({title:z.string(),price:z.union([z.string(),z.number()]),bedrooms:z.number().int(),score:z.number(),version:z.number().int(),checks:z.array(z.object({criterion:z.enum(['active','budget','locality','minimum_bedrooms']),requested:z.unknown(),actual:z.unknown(),passed:z.literal(true)}))}))});
+export const DetailSchema=z.object({record:RecordSchema,qualification:QualificationSchema.optional(),appointments:z.array(RecordSchema).optional(),followups:z.array(RecordSchema).optional()});
 export const ListSchema=z.object({items:z.array(RecordSchema),total:z.number().int().nonnegative(),page:z.number(),page_size:z.number()});
 export const SummarySchema=z.object({metrics:z.object({leads:z.number(),new_leads:z.number(),properties:z.number(),upcoming_visits:z.number(),pending_approvals:z.number()}),recent_leads:z.array(RecordSchema),appointments:z.array(RecordSchema),requests:z.array(RecordSchema)});
 export const SlotsSchema=z.object({items:z.array(RecordSchema),truncated:z.boolean(),provisional:z.literal(true)});

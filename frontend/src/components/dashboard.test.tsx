@@ -185,3 +185,14 @@ it("fails closed on malformed run data", async () => {
 });
 
 
+
+
+it('distinguishes incomplete matching from checked inventory with no eligible property',async()=>{
+ const run=fixture();
+ run.live_steps=run.live_steps.map((step,index)=>({...step,result:{...step.result,data:index===0?{leads:[{id:LEAD,name:'Fictional incomplete lead',bedrooms:null,budget_min:null,budget_max:null,preferred_localities:null}],truncated:false}:{lead_id:LEAD,matching_ready:false,missing_fields:['bedrooms'],invalid_fields:[],matches:[],truncated:false}}}));
+ backend({run});render(<Dashboard/>);
+ expect(await screen.findByText('Matching requirements incomplete: bedrooms.')).toBeVisible();
+ expect(screen.getByText('Matching requirements incomplete; no inventory conclusion.')).toBeVisible();
+ expect(screen.queryByText('No properties met the checked criteria.')).not.toBeInTheDocument();
+ expect(screen.getByText(/Bedrooms unknown/)).toBeVisible();
+});

@@ -14,7 +14,7 @@ async function signIn(page:Page){
 }
 
 test('owner CRM creates, edits, searches, books, reschedules, cancels and archives real fictional records',async({page})=>{
- test.setTimeout(420_000);
+ test.setTimeout(600_000);
  const data=JSON.parse(python('crm_fixture','plan')) as {prefix:string;email:string;starts:string[];start_local:string[];end_local:string[];slot_ids:string[]};
  data.slot_ids=[];
  async function createSlot(index:number){
@@ -27,14 +27,46 @@ test('owner CRM creates, edits, searches, books, reschedules, cancels and archiv
  const errors:string[]=[];page.on('pageerror',err=>errors.push(err.message));
  try{
   await signIn(page);
-  await page.goto('/leads/new');await page.getByLabel('Name',{exact:true}).fill(data.prefix);await page.getByLabel('Email',{exact:true}).fill(data.email);await page.getByLabel('Preferred localities (comma separated)').fill(data.prefix);await page.getByLabel('Minimum budget (INR)').fill('100');await page.getByLabel('Maximum budget (INR)').fill('200');await page.getByLabel('Bedrooms',{exact:true}).fill('2');await page.getByRole('button',{name:'Save record',exact:true}).click();
+  await page.goto('/leads/new');await page.getByLabel('Name',{exact:true}).fill(data.prefix);await page.getByLabel('Email',{exact:true}).fill(data.email);await page.getByRole('button',{name:'Save record',exact:true}).click();
   await expect(page).toHaveURL(/\/leads\/[0-9a-f-]{36}$/);const leadUrl=page.url(),leadId=leadUrl.split('/').at(-1)!;
+  await expect(page.getByText('Qualification is incomplete.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Check property matches',exact:true}).click();await expect(page.getByText(/^Matching is incomplete\./)).toBeVisible();
+  await page.getByRole('button',{name:'Edit record',exact:true}).click();
+  await page.getByLabel('Preferred localities (comma separated)').fill(data.prefix);await page.getByLabel('Minimum budget (INR)').fill('100');await page.getByLabel('Maximum budget (INR)').fill('200');await page.getByLabel('Bedrooms',{exact:true}).fill('2');
+  await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page.getByRole('heading',{name:'Edit lead',exact:true})).toHaveCount(0);
+  await expect(page.getByText('Missing answers: purchase timeframe.',{exact:true})).toBeVisible();
+  // B1 persists owner-managed states without changing the CRM status or sending anything.
+  await page.getByLabel('journey stage',{exact:true}).selectOption('qualifying');
+  await page.getByLabel('contact permission',{exact:true}).selectOption('opted_out');
+  await page.getByLabel('handoff state',{exact:true}).selectOption('requested');
+  await page.getByLabel('Reason / customer permission evidence').fill('Fictional B1 opt-out and handoff');
+  await page.getByRole('button',{name:'Save journey controls',exact:true}).click();
+  await expect(page.getByText('Fictional B1 opt-out and handoff',{exact:false})).toBeVisible();
+  await page.reload();await expect(page.getByLabel('contact permission',{exact:true})).toHaveValue('opted_out');
+  await page.getByLabel('contact permission',{exact:true}).selectOption('opted_in');
+  await page.getByLabel('handoff state',{exact:true}).selectOption('resolved');
+  await page.getByLabel('Reason / customer permission evidence').fill('Fictional explicit permission and human resolution');
+  await page.getByRole('button',{name:'Save journey controls',exact:true}).click();
+  await expect(page.getByText('3 recorded changes. Earlier activity is not backfilled.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Edit record',exact:true}).click();await page.getByLabel('Notes',{exact:true}).fill('Owner edited fictional lead');await page.getByLabel('Lead status').selectOption('qualified');await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page.getByRole('heading',{name:'Edit lead',exact:true})).toHaveCount(0);await expect(page.getByText('Owner edited fictional lead',{exact:true})).toBeVisible();console.log('CRM: lead saved and edited');
   await page.goto('/leads');await page.getByLabel('Search',{exact:true}).fill(data.prefix);await page.getByRole('combobox',{name:'Filter',exact:true}).selectOption('qualified');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('tbody')).toContainText(data.email);
   mkdirSync('artifacts',{recursive:true});await page.screenshot({path:'artifacts/crm-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:'artifacts/crm-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
   await page.goto('/properties/new');await page.getByLabel('Title',{exact:true}).fill(data.prefix);await page.getByLabel('Locality',{exact:true}).fill(data.prefix);await page.getByLabel('Price (INR)').fill('150');await page.getByLabel('Bedrooms',{exact:true}).fill('2');await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page).toHaveURL(/\/properties\/[0-9a-f-]{36}$/);const propertyUrl=page.url(),propertyId=propertyUrl.split('/').at(-1)!;
   await page.getByRole('button',{name:'Edit record',exact:true}).click();await page.getByLabel('Description',{exact:true}).fill('Owner edited fictional property');await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page.getByRole('heading',{name:'Edit property',exact:true})).toHaveCount(0);await expect(page.getByText('Owner edited fictional property',{exact:true})).toBeVisible();console.log('CRM: property saved and edited');
+  // B2 uses the same live CRM records, then invalidates and renews explicit owner review.
+  await page.goto(leadUrl);await page.getByRole('button',{name:'Check property matches',exact:true}).click();await expect(page.getByRole('link',{name:data.prefix,exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Edit record',exact:true}).click();await page.getByLabel('Purchase timeframe').selectOption('within_3_months');await page.getByRole('button',{name:'Save record',exact:true}).click();
+  await expect(page.getByText('Requirements complete; owner confirmation required.',{exact:true})).toBeVisible();
+  await page.getByLabel('Qualification review reason',{exact:true}).fill('Fictional B2 owner review');await page.getByRole('button',{name:'Confirm qualification',exact:true}).click();await expect(page.getByText('Qualification is current.',{exact:true})).toBeVisible();
+  await page.reload();await expect(page.getByText('Qualification is current.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Edit record',exact:true}).click();await page.getByLabel('Bedrooms',{exact:true}).fill('');await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page.getByText('Qualification needs owner review.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Check property matches',exact:true}).click();await expect(page.getByText('Matching is incomplete. Review: bedrooms.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Edit record',exact:true}).click();await page.getByLabel('Bedrooms',{exact:true}).fill('2');await page.getByRole('button',{name:'Save record',exact:true}).click();await expect(page.getByRole('heading',{name:'Edit lead',exact:true})).toHaveCount(0);
+  await page.getByLabel('Qualification review reason',{exact:true}).fill('Fictional B2 renewed review');await page.getByRole('button',{name:'Confirm qualification',exact:true}).click();await expect(page.getByText('Qualification is current.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Check property matches',exact:true}).click();await expect(page.getByRole('link',{name:data.prefix,exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.setViewportSize({width:1440,height:1000});
+  console.log('B2: partial answers, matching, explicit review and requalification persisted');
   await page.goto('/appointments/new?lead_id='+leadId);await page.getByRole('combobox',{name:'Property',exact:true}).selectOption(propertyId);
   await createSlot(0);
   await page.getByRole('button',{name:'Prepare owner review',exact:true}).click();await expect(page.getByRole('heading',{name:'Review appointment request'})).toBeVisible();

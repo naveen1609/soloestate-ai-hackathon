@@ -7,6 +7,7 @@ from pydantic import AwareDatetime
 from app.owner_api import require_owner
 from app.crm import CRM, CRMError
 from app import crm_schemas as s
+from app.journey import JourneyUpdate
 
 router=APIRouter(prefix='/owner/crm',dependencies=[Depends(require_owner)])
 
@@ -102,3 +103,32 @@ def commit(identifier:UUID,body:s.Confirm,crm:CRM=Depends(service)): return crm.
 
 @router.post('/appointment-requests/{identifier}/reject')
 def reject(identifier:UUID,body:s.Confirm,crm:CRM=Depends(service)): return crm.reject(identifier,body)
+
+
+@router.post('/leads/{identifier}/journey')
+def update_journey(identifier:UUID,body:JourneyUpdate,crm:CRM=Depends(service)):
+    from app.journey import update
+    return update(crm,identifier,body)
+
+
+@router.get('/leads/{identifier}/activities')
+def lead_activities(identifier:UUID,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.journey import activities
+    return activities(crm,identifier,page,page_size)
+
+
+@router.post('/leads/{identifier}/qualify')
+def qualify(identifier:UUID,body:s.Qualify,crm:CRM=Depends(service)):
+    from app.qualification import confirm
+    return confirm(crm,identifier,body)
+
+
+@router.get('/leads/{identifier}/matches')
+def matches(identifier:UUID,limit:int=Query(5,ge=1,le=20),crm:CRM=Depends(service)):
+    from psycopg.rows import dict_row
+    from app.qualification import property_matches
+    with crm.connect() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            lead=cur.execute('SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE',(identifier,)).fetchone()
+            if lead is None: raise CRMError('Active lead not found.',404)
+            return property_matches(cur,lead,limit).model_dump(mode='json')

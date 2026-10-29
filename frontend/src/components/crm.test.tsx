@@ -109,3 +109,29 @@ it('requires explicit owner confirmation before committing a prepared appointmen
  await waitFor(()=>expect(push).toHaveBeenCalledWith('/appointments/'+ID));
  const request=fetch.mock.calls.find(([path])=>String(path).endsWith('/commit'));expect(JSON.parse(request![1]!.body as string).expected_payload_hash).toBe('a'.repeat(64));
 });
+
+
+it('uses the committed journey version for an immediate lead edit',async()=>{
+ const user=userEvent.setup();let latest={...lead,journey_stage:'new',contact_preference:'unspecified',contact_permission:'unknown',handoff_state:'none'};
+ const fetch=backend((path,init)=>{
+  if(path.includes('/activities'))return Response.json({items:[],total:0,page:1,page_size:20});
+  if(path.endsWith('/journey')&&init?.method==='POST'){latest={...latest,version:2,journey_stage:'qualifying'};return Response.json({record:latest});}
+  return Response.json({record:latest});
+ });
+ render(<CrmRecords entity="leads" id={ID}/>);
+ await user.selectOptions(await screen.findByLabelText('journey stage'),'qualifying');
+ await user.type(screen.getByLabelText('Reason / customer permission evidence'),'Fictional qualification');await user.click(screen.getByRole('button',{name:'Save journey controls'}));
+ await waitFor(()=>expect(screen.getByLabelText('Reason / customer permission evidence')).toHaveValue(''));
+ await user.click(screen.getByRole('button',{name:'Edit record'}));await user.click(screen.getByRole('button',{name:'Save record'}));
+ await waitFor(()=>expect(fetch.mock.calls.some(([,init])=>init?.method==='PATCH'&&JSON.parse(String(init.body)).expected_version===2)).toBe(true));
+});
+
+
+it('saves a partial lead with explicit null requirements rather than zero defaults',async()=>{
+ const user=userEvent.setup();const fetch=backend();render(<RecordForm entity="leads"/>);
+ await user.type(screen.getByLabelText('Name'),'Fictional incomplete buyer');await user.type(screen.getByLabelText('Email'),'incomplete@example.invalid');
+ await user.click(screen.getByRole('button',{name:'Save record'}));
+ await waitFor(()=>expect(push).toHaveBeenCalled());
+ const call=fetch.mock.calls.find(([,init])=>init?.method==='POST')!;
+ expect(JSON.parse(String(call[1]?.body))).toMatchObject({budget_min:null,budget_max:null,preferred_localities:null,bedrooms:null,purchase_timeframe:null});
+});

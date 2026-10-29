@@ -28,6 +28,7 @@ elif sys.argv[1]=='cleanup':
         conn.execute('DELETE FROM soloestate.approvals WHERE run_id=ANY(%s::uuid[])',(runs,))
         conn.execute('DELETE FROM soloestate.run_steps WHERE run_id=ANY(%s::uuid[])',(runs,))
         conn.execute('DELETE FROM soloestate.runs WHERE id=ANY(%s::uuid[])',(runs,))
+        conn.execute('DELETE FROM soloestate.lead_activities WHERE lead_id=ANY(%s::uuid[])',(leads,))
         conn.execute('DELETE FROM soloestate.crm_operations WHERE entity_id=ANY(%s::uuid[])',(ids,))
         conn.execute('DELETE FROM soloestate.visit_slots WHERE id=ANY(%s::uuid[])',(slots,))
         conn.execute('DELETE FROM soloestate.properties WHERE id=ANY(%s::uuid[])',(props,))

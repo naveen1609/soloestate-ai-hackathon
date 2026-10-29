@@ -4,9 +4,9 @@ import { baseUrl, body, clear, COOKIE, error, sameOrigin } from "../../../../lib
 const uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 export function permitted(method: string, path: string): boolean {
   if (path.startsWith('crm/')) {
-    if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$`).test(path);
+    if (method === 'GET') return new RegExp(`^crm/(summary|leads|properties|appointments|visit-slots)$|^crm/(leads|properties|appointments|appointment-requests)/${uuid}$|^crm/operations/[A-Za-z0-9:_-]{1,128}$|^crm/leads/${uuid}/(activities|matches)$`).test(path);
     if (method === 'PATCH') return new RegExp(`^crm/(leads|properties)/${uuid}$`).test(path);
-    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/archive$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$`).test(path);
+    return method === 'POST' && new RegExp(`^crm/(leads|properties|visit-slots|appointment-requests)$|^crm/leads/${uuid}/(archive|journey|qualify)$|^crm/appointments/${uuid}/cancel$|^crm/appointment-requests/${uuid}/(commit|reject)$`).test(path);
   }
   return method === "GET" ? new RegExp(`^(runs|approvals)(/${uuid})?$`).test(path) :
     method === "POST" && (path === "runs" || new RegExp(`^runs/${uuid}/resume$|^approvals/${uuid}/decision$`).test(path));
@@ -24,7 +24,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     'crm/appointments':['q','sort','page','page_size','status','period','lead_id','property_id','since','until'],
     'crm/visit-slots':['since','until'],
   };
-  const allowed = path === 'runs' ? ['request_key'] : crmQueries[path] ?? [];
+  const allowed = path === 'runs' ? ['request_key'] : crmQueries[path] ?? (new RegExp(`^crm/leads/${uuid}/activities$`).test(path) ? ['page','page_size'] : new RegExp(`^crm/leads/${uuid}/matches$`).test(path) ? ['limit'] : []);
   if ([...query.keys()].some(key => !allowed.includes(key) || query.getAll(key).length !== 1) || (query.get("request_key")?.length ?? 0) > 128 || query.toString().length > 4000) return error("Invalid query.", 400);
   try {
     const payload = request.method !== "GET" ? JSON.stringify(await body(request)) : undefined;

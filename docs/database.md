@@ -1,6 +1,6 @@
 # PostgreSQL and Supabase setup
 
-The application uses four immutable migrations and deterministic fictional data. Live Supabase connectivity, checksummed setup, typed business tools, owner consent, booking integrity and session persistence have been verified. Five schema tests still require a separate empty disposable test database; see testing.md.
+The application uses six immutable migrations and deterministic fictional data. Live Supabase connectivity, checksummed setup, typed business tools, owner consent, booking integrity and session persistence have been verified. Five schema tests still require a separate empty disposable test database; see testing.md.
 
 ## Supabase project and connection
 
@@ -44,9 +44,9 @@ Stop at a nonzero exit code and resolve it before running the next command. Ever
 
 ```json
 {"status":"ok","connected":true}
-{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql","0004_core_crm.sql"]}
+{"status":"ok","applied":["0001_initial.sql","0002_execution_integrity.sql","0003_dashboard_sessions.sql","0004_core_crm.sql","0005_customer_journey.sql","0006_lead_qualification.sql"]}
 {"status":"ok","seeded":true}
-{"status":"ok","migrations":4,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
+{"status":"ok","migrations":6,"seed_records":{"leads":4,"properties":3,"visit_slots":6},"demo_week":"2026-11-02/2026-11-08","currency":"INR"}
 ```
 
 Repeat `migrate`, `seed`, and `verify` to check repeatability. A repeated migration returns `applied: []`; seeds do not duplicate rows or overwrite existing edits. Missing seed IDs are restored when seeding again. The verification counts exact fictional IDs; it is not a full checksum of current business records.
@@ -59,7 +59,8 @@ Use the repository runner as the migration source of truth. This is a `supabase/
 
 | Table | Purpose and constraints |
 | --- | --- |
-| `leads` | Fictional contacts, preferences, INR budget range, bedrooms, lead status; nonnegative, ordered budgets |
+| `leads` | Fictional contacts, INR budget, bedrooms, legacy status; B1 separate journey, contact preference/permission and handoff state |
+| `lead_activities` | B1 owner-only before/after state, reason, timestamp and deferred CRM operation reference; RLS, no browser policy |
 | `properties` | Fictional inventory with positive INR prices and bedrooms; active flag |
 | `visit_slots` | Owner's exact appointment windows in UTC; valid time range and no overlaps |
 | `runs` | Goal, request idempotency key, state, structured plan and outcome JSON objects |
@@ -69,6 +70,7 @@ Use the repository runner as the migration source of truth. This is a `supabase/
 | `bookings` | Run, lead, property, slot and matching booking approval; one confirmed booking per slot and one booking per approval |
 | `approval_decisions` | Authenticated owner decision evidence, review hash and idempotency key |
 | `dashboard_sessions` | Hashed single-use login tickets and expiring, revocable owner sessions |
+| `crm_operations` | Committed owner operations, request fingerprints, retry results and audit provenance |
 | `schema_migrations` / `seed_history` | Committed setup history and checksums |
 
 UUIDs are assigned by application code; fixed UUIDs identify seed records. All timestamps use `timestamptz`. Money uses `numeric(14,2)` and is INR throughout this demo. Tool matching is computed from lead preferences and inventory in Phase 5; there is no synthetic matches table.
@@ -80,7 +82,7 @@ Owner authentication, immutable snapshots, version/hash binding, approval transi
 ## Privacy and access
 
 - `soloestate` is a private schema. Leave it out of Supabase's exposed Data API schemas.
-- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all thirteen tables with no browser access policies. Newly created schema defaults must remain private.
+- Schema/table access from `PUBLIC` is revoked. RLS is enabled on all fourteen tables with no browser access policies. Newly created schema defaults must remain private.
 - No anon/authenticated role grants, browser Supabase client, public database endpoint, or service-role API key is added.
 - Database owners bypass RLS. RLS here is an additional browser-access barrier, not owner authorization or multi-tenancy. The backend is the trusted boundary.
 - Restrict project access, database network access, and deployment secrets appropriately. Never log DSNs or share certificate private keys (the downloaded server CA certificate is public).
@@ -123,8 +125,18 @@ A certificate path must have one matching pair of quotes, for example `DATABASE_
 
 Percent-encode reserved characters in the URI password before inserting it in the connection string. An unencoded `@` can be misinterpreted as part of the hostname, causing a misleading DNS failure. The connection helper now detects that malformed host and gives a safe configuration error. Actual credentials remain only in the ignored backend environment file.
 
-Phase 7 update: the second immutable migration adds worker state/leases/resume limits and owner decision evidence. Approval/draft/booking/slot triggers now enforce the invariants described in owner-recovery.md. The original migration remains unchanged. New-project verification expects three applied migrations and the same fictional seed counts.
+Historical Phase 7 baseline: the second immutable migration added worker state/leases/resume limits and owner decision evidence. Approval/draft/booking/slot triggers enforce the invariants described in owner-recovery.md. That baseline had two applied migrations and unchanged fictional seed counts; it is not the current migration total.
 
-Phase 8 update: immutable migration 0003_dashboard_sessions.sql adds hashed, expiring one-time tickets and revocable owner browser sessions. The schema now has twelve private RLS-enabled tables and three applied migrations; fictional seed counts remain unchanged.
+Historical Phase 8 baseline: migration 0003_dashboard_sessions.sql added hashed, expiring one-time tickets and revocable owner browser sessions. At that stage there were twelve private RLS-enabled tables and three applied migrations, with unchanged fictional seed counts. The current Phase A totals follow below.
 
-Phase A update: migration 0004_core_crm.sql adds archive/version metadata, owner-operation provenance, replacement-booking linkage, cancellation reason and the private crm_operations audit/idempotency table. Current verification expects four migrations and thirteen RLS-enabled tables. Previously applied migrations and seed checksums remain unchanged. See phase-a.md.
+Phase A update: migration 0004_core_crm.sql adds archive/version metadata, owner-operation provenance, replacement-booking linkage, cancellation reason and the private crm_operations audit/idempotency table. Phase A verification expected four migrations and thirteen RLS-enabled tables; B1 now adds a fifth migration and fourteenth table. Previously applied migrations and seed checksums remain unchanged. See phase-a.md.
+
+## B1 additive schema
+
+Migration `0005_customer_journey.sql` adds separate journey/contact/handoff columns to leads and private RLS `lead_activities` (fourteen tables including ledgers). See [B1 contract](phase-b-plan.md#b1-contract). Activity and CRM operation evidence commit together via a deferred foreign key. Applied migrations 0001–0004 are unchanged. Existing rows receive new/unspecified/unknown/none defaults without consent claims or backfilled history. Run the existing migrate command once before starting updated code; never rerun seeds to obtain B1 defaults.
+
+## B2 qualification schema
+
+Migration 0006_lead_qualification.sql expands nullability on the original lead budget/locality/bedroom columns, adds nullable purchase_timeframe and qualification_fingerprint, and enforces a nonnegative ceiling independently when the floor is unknown. Existing nonnegative/order/nonempty/positive-bedroom checks still govern supplied values. No new table, duplicate profile, record rewrite or seed change; there remain fourteen private RLS tables. Existing timeframe/review values are unknown, not backfilled claims.
+
+The server validates finite two-decimal INR amounts, bounded nonempty localities and strict 1–30 bedrooms. NULL represents an unanswered question; explicit no_fixed_deadline is a known timeframe answer. A positive ceiling is needed for readiness. Backend-owned fingerprints reference canonical requirement facts; requirement edits clear current review and record history atomically. No API accepts a client fingerprint. Migrations 0001–0005 remain immutable. [Contract](phase-b-plan.md#b2-contract--approved-29-october-2026), [evidence](phase-b2-verification.md).

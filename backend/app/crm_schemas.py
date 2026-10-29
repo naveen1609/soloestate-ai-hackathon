@@ -6,6 +6,7 @@ import re
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 from app.tools.schemas import Input
+from app.qualification import Timeframe
 
 
 class Write(Input):
@@ -19,10 +20,11 @@ class Versioned(Write):
 class LeadCreate(Write):
     name: str = Field(min_length=1,max_length=200)
     email: str = Field(min_length=3,max_length=254)
-    preferred_localities: list[str] = Field(min_length=1,max_length=20)
-    budget_min: Decimal = Field(ge=0,max_digits=14,decimal_places=2,allow_inf_nan=False)
-    budget_max: Decimal = Field(ge=0,max_digits=14,decimal_places=2,allow_inf_nan=False)
-    bedrooms: int = Field(ge=1,le=30,strict=True)
+    preferred_localities: list[str] | None = Field(default=None,min_length=1,max_length=20)
+    budget_min: Decimal | None = Field(default=None,ge=0,max_digits=14,decimal_places=2,allow_inf_nan=False)
+    budget_max: Decimal | None = Field(default=None,ge=0,max_digits=14,decimal_places=2,allow_inf_nan=False)
+    bedrooms: int | None = Field(default=None,ge=1,le=30,strict=True)
+    purchase_timeframe: Timeframe | None = None
     status: Literal['new','contacted','qualified','closed'] = 'new'
     notes: str = Field(default='',max_length=5000)
 
@@ -36,14 +38,21 @@ class LeadCreate(Write):
     @field_validator('preferred_localities')
     @classmethod
     def localities(cls,value):
-        cleaned=list(dict.fromkeys(item.strip() for item in value))
+        if value is None: return None
+        cleaned=[]
+        seen=set()
+        for item in value:
+            normalized=item.strip()
+            if normalized.lower() not in seen:
+                cleaned.append(normalized)
+                seen.add(normalized.lower())
         if any(not item or len(item)>120 for item in cleaned):
             raise ValueError('Localities must be nonempty and at most 120 characters')
         return cleaned
 
     @model_validator(mode='after')
     def budgets(self):
-        if self.budget_max<self.budget_min: raise ValueError('Maximum budget must cover minimum budget')
+        if self.budget_max is not None and self.budget_min is not None and self.budget_max<self.budget_min: raise ValueError('Maximum budget must cover minimum budget')
         return self
 
 
@@ -99,3 +108,7 @@ class Confirm(Write):
 
 class Cancel(Versioned):
     reason: str = Field(min_length=1,max_length=1000)
+
+
+class Qualify(Versioned):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")

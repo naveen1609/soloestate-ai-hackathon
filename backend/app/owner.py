@@ -12,7 +12,7 @@ from psycopg.rows import dict_row
 from app.agent.store import RunConflict, RunStore
 from app.config import Settings
 from app.database import connect
-from app.tools.service import _booking_snapshot, ToolFailure
+from app.tools.service import _booking_snapshot, ToolFailure, require_contact_action
 
 
 def authenticate_owner(token: str | None, settings: Settings):
@@ -72,7 +72,12 @@ class OwnerService:
                 draft = None
                 if row["kind"] == "followup":
                     draft = cur.execute("SELECT * FROM soloestate.followup_drafts WHERE id=%s FOR UPDATE", (row["draft_id"],)).fetchone()
-                    lead = cur.execute("SELECT email,archived_at FROM soloestate.leads WHERE id=%s FOR SHARE", (row["lead_id"],)).fetchone()
+                    lead = cur.execute("SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE", (row["lead_id"],)).fetchone()
+                    if request.decision == 'approved':
+                        try:
+                            require_contact_action(lead)
+                        except ToolFailure as exc:
+                            raise RunConflict(str(exc)) from None
                     if request.decision=='approved' and lead['archived_at'] is not None:
                         raise RunConflict('Lead is archived; restore it before approving a follow-up.')
                     current = {"draft_id": str(draft["id"]), "lead_id": str(draft["lead_id"]), "version": draft["version"],

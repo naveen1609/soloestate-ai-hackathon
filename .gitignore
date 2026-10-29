@@ -18,6 +18,8 @@ htmlcov/
 test_baseten.py
 test_meta_api.py
 AGENTS.md
+# The root handoff instructions must be available to future repository agents.
+!/AGENTS.md
 
 # JavaScript / Next.js
 node_modules/

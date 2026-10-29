@@ -27,25 +27,28 @@ def required(row, label="Record"):
     return row
 
 
+def require_contact_action(lead):
+    # Called with a locked lead row so an opt-out cannot race the write.
+    if lead['contact_permission'] == 'opted_out' or lead['contact_preference'] == 'none':
+        raise ToolFailure('contact_blocked', 'Customer contact is opted out or disabled.')
+    if lead['handoff_state'] in {'requested', 'in_progress'}:
+        raise ToolFailure('handoff_required', 'Resolve the human handoff before customer-directed actions.')
+
+
 def get_leads(cur, args: s.GetLeadsInput, context):
     rows = cur.execute("""SELECT * FROM soloestate.leads
         WHERE archived_at IS NULL AND created_at >= %s AND created_at < %s
         ORDER BY created_at DESC, id LIMIT %s""", (args.since, args.until, args.limit + 1)).fetchall()
+    from app.qualification import readiness
+    for row in rows:
+        row['qualification'] = readiness(row)
     return s.LeadsOutput(leads=rows[:args.limit], truncated=len(rows) > args.limit)
 
 
 def get_property_matches(cur, args: s.GetMatchesInput, context):
     lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL", (args.lead_id,)).fetchone(), "Active lead")
-    rows = cur.execute("""SELECT id,title,locality,price,bedrooms,description,
-        CASE WHEN bedrooms=%s THEN 100 ELSE 90 END AS score
-        FROM soloestate.properties WHERE active AND price BETWEEN %s AND %s
-        AND bedrooms >= %s AND lower(locality) = ANY(%s::text[])
-        ORDER BY CASE WHEN bedrooms=%s THEN 0 ELSE 1 END, price, id LIMIT %s""",
-        (lead["bedrooms"], lead["budget_min"], lead["budget_max"], lead["bedrooms"],
-         [locality.lower() for locality in lead["preferred_localities"]], lead["bedrooms"], args.limit + 1)).fetchall()
-    for row in rows:
-        row["reasons"] = ["within_budget", "preferred_locality", "exact_bedrooms" if row["bedrooms"] == lead["bedrooms"] else "additional_bedrooms"]
-    return s.MatchesOutput(lead_id=args.lead_id, matches=rows[:args.limit], truncated=len(rows) > args.limit)
+    from app.qualification import property_matches
+    return property_matches(cur, lead, args.limit)
 
 
 def get_available_slots(cur, args: s.GetSlotsInput, context):
@@ -82,7 +85,8 @@ def create_followup_draft(cur, args: s.DraftInput, context):
         _same(row["lead_id"] == args.lead_id and row["subject"] == args.subject and row["body"] == args.body)
         return s.DraftOutput(draft=row, created=False)
     _require_open(status)
-    required(cur.execute("SELECT id FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (args.lead_id,)).fetchone(), "Active lead")
+    lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (args.lead_id,)).fetchone(), "Active lead")
+    require_contact_action(lead)
     row = cur.execute("""INSERT INTO soloestate.followup_drafts
         (id,run_id,lead_id,idempotency_key,subject,body) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
         (uuid4(), context.run_id, args.lead_id, args.idempotency_key, args.subject, args.body)).fetchone()
@@ -94,6 +98,7 @@ def _booking_snapshot(cur, lead_id, property_id, slot_id):
     slot = required(cur.execute("SELECT * FROM soloestate.visit_slots WHERE id=%s FOR UPDATE", (slot_id,)).fetchone(), "Slot")
     prop = required(cur.execute("SELECT * FROM soloestate.properties WHERE id=%s FOR SHARE", (property_id,)).fetchone(), "Property")
     lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE", (lead_id,)).fetchone(), "Lead")
+    require_contact_action(lead)
     if lead['archived_at'] is not None:
         raise ToolFailure('lead_unavailable', 'The lead is archived.')
     now = cur.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
@@ -123,7 +128,8 @@ def request_approval(cur, args: s.ApprovalInput, context):
                                      (args.draft_id, context.run_id)).fetchone(), "Draft in this run")
         if draft["status"] != "draft":
             raise ToolFailure("invalid_state", "Only a draft can be submitted for follow-up approval.")
-        lead = required(cur.execute("SELECT email FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (draft["lead_id"],)).fetchone(), "Active lead")
+        lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (draft["lead_id"],)).fetchone(), "Active lead")
+        require_contact_action(lead)
         lead_id = draft["lead_id"]
         payload = {"draft_id": str(draft["id"]), "lead_id": str(lead_id), "version": draft["version"],
                    "channel": draft["channel"], "recipient": lead["email"], "subject": draft["subject"], "body": draft["body"]}

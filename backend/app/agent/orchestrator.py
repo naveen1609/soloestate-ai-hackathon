@@ -21,6 +21,7 @@ Messages remain drafts; request owner approval before sending or booking. No too
 Use explicit timezone-aware date ranges. The actual current UTC time is supplied; never treat fixed demo dates as today.
 Read data before using record IDs in mutations. Use stable idempotency keys for repeated identical actions.
 On tool failure, inspect its actual code and adapt within the budget; never claim the failed action succeeded.
+Missing qualification answers are unknown, not defaults. If matching_ready is false, report incomplete criteria rather than claiming no suitable inventory. Matching scores are deterministic ranking rules, not confidence. Only the owner can confirm qualification.
 Use only the server-permitted tools. Run context and owner decisions are server-controlled.
 """
 

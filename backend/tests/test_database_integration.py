@@ -90,7 +90,7 @@ def test_booking_uniqueness_and_approval_binding(db):
 def test_rls_enabled_and_no_public_schema_access(db):
     rows = db.execute("""SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='soloestate' AND c.relkind='r'""").fetchall()
-    assert len(rows) == 13
+    assert len(rows) == 14
     assert all(row[0] for row in rows)
     public_access = db.execute("""SELECT EXISTS (SELECT 1 FROM pg_namespace n,
         LATERAL aclexplode(n.nspacl) a WHERE n.nspname='soloestate' AND a.grantee=0 AND a.privilege_type='USAGE')""").fetchone()[0]

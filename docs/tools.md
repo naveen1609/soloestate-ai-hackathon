@@ -52,7 +52,7 @@ Default, without database test opt-ins:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected: **128 passed, 55 skipped**. The skips are 16 tool cases, 5 agent cases, 15 owner/recovery/concurrency cases, and the original 5 empty-database schema tests.
+Expected without database opt-ins or TEST_DATABASE_URL: **152 passed, 75 skipped**. The skips are 70 opt-in tool/agent/session/integrity/CRM database cases and the five separate empty-database schema cases; see testing.md.
 
 Run the full suite including rollback-only tool tests against the configured Supabase application schema:
 
@@ -61,16 +61,24 @@ Run the full suite including rollback-only tool tests against the configured Sup
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **178 passed, 5 skipped** and no broken dependencies. The 5 remaining skips require a separate empty `TEST_DATABASE_URL`, as documented in `database.md`. To run only tool integration cases:
+Expected: **222 passed, 5 skipped** and no broken dependencies. The 5 remaining skips require a separate empty `TEST_DATABASE_URL`, as documented in `database.md`. To run only tool integration cases:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q -m tools_database --run-tool-db-tests
 ```
 
-Expected: **16 passed**. Run these tests sequentially, not with pytest-xdist. They require the current three migrations and a trusted database connection. They create uniquely named fictional contacts, inventory, future slots and runs inside transactions; simulate decisions only in the fixture; then roll back all changes. No customer messages are sent and no test booking is retained. These tests cover individual tool behavior and sequential contention; they do not establish full multi-process orchestration recovery or concurrent-owner approval behavior.
+Expected: **16 passed**. Run these tests sequentially, not with pytest-xdist. They require the current six migrations and a trusted database connection. They create uniquely named fictional contacts, inventory, future slots and runs inside transactions; simulate decisions only in the fixture; then roll back all changes. No customer messages are sent and no test booking is retained. These tests cover individual tool behavior and sequential contention; they do not establish full multi-process orchestration recovery or concurrent-owner approval behavior.
 
 If anything fails, share the exact command and safe test failure/error output. Never share `.env`, connection strings, API keys, or raw driver debug logs.
 
 ## Owner lifecycle
 
 Phase 6 now wires these definitions and actual result envelopes into the bounded real Meta orchestration loop, with persisted plans and steps. Phase 7 now implements authenticated owner decisions, immutable approval lifecycle guards, bounded recovery, terminal-run replay, real independent-session concurrency checks and confirmed-slot edit protection. See owner-recovery.md. Owner decisions remain outside the tool registry. The agent must never be given approval authority.
+
+B1: draft creation, follow-up approval and booking paths recheck locked lead contact_permission, contact_preference and handoff_state. Opt-out/preference none and requested/in_progress handoff reject new customer-directed actions. Replayed completed actions return prior evidence only. No new model mutation tool or delivery capability was added. See [B1 contract](phase-b-plan.md#b1-contract).
+
+## B2 typed read extensions
+
+The registry still has seven tools. get_leads includes nullable canonical answers and derived qualification readiness. get_property_matches shares backend/app/qualification.py with the owner read API; missing/invalid core requirements yield matching_ready=false, missing_fields/invalid_fields and an empty matches list. This is incomplete input, not a claim of no suitable inventory. Complete criteria with matches=[] means no eligible property at that check.
+
+Active inventory, inclusive budget, normalized exact locality and minimum bedrooms are hard constraints. Order is exact bedrooms, price, ID; 100/90 scores are deterministic ranks, never confidence. Each result includes criteria_snapshot, checked_at, lead_version and property version plus requested/actual/passed checks. Timeframe is reported but not a property possession filter. No model may supply arbitrary filters, persist qualification, approve or deliver messages. [B2 report](phase-b2-verification.md).

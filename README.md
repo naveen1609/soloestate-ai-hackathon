@@ -4,6 +4,8 @@ An owner-directed AI Business Operating System for a one-person real estate comp
 
 **Phase A Core CRM implemented; phases 1–10 preserved.** The local hackathon application has a responsive dashboard, real Meta integration, persistent Supabase records, approval gates, booking integrity, bounded recovery and automated regression coverage. This is a single-owner demonstration; see [limitations](docs/limitations.md).
 
+Coding-agent entry point: read [AGENTS.md](AGENTS.md), [project state](docs/PROJECT_STATE.md) and [current handoff](docs/HANDOFF.md) before editing. They identify the canonical reference documents, preservation requirements, actual verification evidence and next proposed increment.
+
 ## Core CRM update
 
 The overview now shows live business records. Leads, properties and appointments have owner-managed CRM workspaces; the Muse Spark goal dashboard remains at `/agent`. See [Phase A setup and owner walkthrough](docs/phase-a.md), [verification evidence](docs/phase-a-verification.md), and the separate [Phase B proposal](docs/phase-b-plan.md). Restart existing servers after updating.
@@ -48,7 +50,7 @@ Run each command separately and stop on a nonzero exit code:
 .\.venv\Scripts\python.exe -m scripts.demo_preflight
 ```
 
-Expected: status ok, four migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
+Expected: status ok, six migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
 
 Start the API and keep this terminal open:
 
@@ -116,7 +118,7 @@ From backend:
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **152 passed, 75 skipped** and no broken requirements. With the opt-in tool/agent/integrity flags, the current suite is expected to produce **222 passed, 5 skipped**. Phase 9 executed all business database cases in groups; Phase 10 adds five preflight tests. Five schema cases still require a separate empty disposable TEST_DATABASE_URL and are not claimed as passed.
+Historical Phase A baseline: **152 passed, 75 skipped** without database opt-ins and **222 passed, 5 skipped** with them, as recorded in [Phase A verification](docs/phase-a-verification.md). Current B2 commands and actual totals are in [B2 verification](docs/phase-b2-verification.md); do not use older counts as the current expected output. Five schema cases still require a separate empty disposable TEST_DATABASE_URL and are not claimed as passed.
 
 From frontend:
 
@@ -128,9 +130,9 @@ npm run build
 npm run test:e2e
 ```
 
-Expected: **65 unit/component tests pass**, lint/typecheck/build exit zero, **7 browser checks pass and 1 live-model case skips**. Browser checks require a running configured backend and Microsoft Edge. Each stateful check creates its own fictional scenario and cleans it up; saved demo decisions do not affect assertions. External model calls are mocked in automated backend tests; production has no mock AI fallback.
+Lint/typecheck/build should exit zero. The historical Phase A baseline was **65 unit/component tests**, **7 browser passes and 1 live-model skip**; current B2 executed results are in its verification report. Browser checks require a running configured backend and Microsoft Edge. Each stateful check creates its own fictional scenario and cleans it up; saved demo decisions do not affect assertions. External model calls are mocked in automated backend tests; production has no mock AI fallback.
 
-See [test commands and coverage matrix](docs/testing.md), [Phase 9 evidence](docs/phase-9-verification.md), and [Phase 10 evidence](docs/phase-10-verification.md). Prior phase documents are historical records of their respective implementations.
+See [test commands and coverage matrix](docs/testing.md) and the current [Phase A evidence](docs/phase-a-verification.md). [Phase 9](docs/phase-9-verification.md) and [Phase 10](docs/phase-10-verification.md) documents are historical records of their respective implementations.
 
 ## Repository map
 
@@ -138,7 +140,7 @@ See [test commands and coverage matrix](docs/testing.md), [Phase 9 evidence](doc
 - `backend/app/owner.py`, `owner_api.py`, `dashboard_sessions.py`: owner decisions, HTTP access and browser sessions.
 - `backend/scripts/`: database setup, connectivity checks, owner controls, execution and demo preflight.
 - `frontend/src/`: dashboard and fixed same-origin BFF routes; `frontend/e2e/`: browser checks and isolated fixtures.
-- `supabase/migrations/`: three immutable checksummed migrations; `seed.sql`: deterministic fictional records.
+- `supabase/migrations/`: six immutable checksummed migrations; `seed.sql`: deterministic fictional records.
 - `docs/`: setup, architecture, model usage, demo, limitations and executed test evidence.
 
 ## If something fails
@@ -146,3 +148,7 @@ See [test commands and coverage matrix](docs/testing.md), [Phase 9 evidence](doc
 Share the exact failing command, exit code, test name and sanitized error/terminal output. For a failed goal retain its request key and inspect the saved run before retrying. An unknown response is not confirmed success. For an expired sign-in link generate a new one. For EADDRINUSE stop the conflicting local service. Database/TLS troubleshooting is in [database.md](docs/database.md).
 
 Never share .env contents, API keys, cookies, login URLs or credential-bearing connection strings. No automatic commits, pushes, deployment or hackathon submission are performed.
+
+B1 adds owner-managed journey/contact/handoff controls and activity history to the existing lead detail page. Apply the additive migration before restarting. No channels or delivery are enabled. See [B1 contract](docs/phase-b-plan.md#b1-contract), [roadmap](docs/ROADMAP.md), [decisions](docs/DECISIONS.md) and current [handoff](docs/HANDOFF.md).
+
+B2 adds incomplete lead requirements, purchase timeframe, explicit owner qualification/requalification and explained live property matching on existing records. Blank requirements remain unknown; matching does not book or grant contact permission. Apply migration 0006 before updated startup; no new secrets/dependencies or seed reset. See the [approved B2 contract](docs/phase-b-plan.md#b2-contract--approved-29-october-2026), [verification and walkthrough](docs/phase-b2-verification.md) and [current handoff](docs/HANDOFF.md). B3 remains unstarted.

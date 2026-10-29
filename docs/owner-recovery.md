@@ -69,7 +69,7 @@ FastAPI exposes these owner-only routes:
 
 All require `Authorization: Bearer <OWNER_API_TOKEN>`; missing, invalid or unconfigured credentials fail closed. The credential is a high-entropy server secret, never returned in API responses or placed in `NEXT_PUBLIC_` variables. Health remains unauthenticated. The local owner CLI reads the ignored backend environment file and relies on the local operating-system account's access to that file; it never prints the token. `python -m scripts.owner init` is idempotent and creates a credential only when absent.
 
-This is single-owner hackathon authentication, not multi-user account management. Use loopback for the local demo; a public deployment needs HTTPS and a suitably restricted database runtime role. The dashboard/login flow is Phase 8; no frontend API key embedding is added here.
+This is single-owner hackathon authentication, not multi-user account management. Use loopback for the local demo; a public deployment needs HTTPS and a suitably restricted database runtime role. The dashboard/login flow is implemented; the current CRM overview is / and AI execution is /agent. No permanent API key is embedded in the frontend. Owner CRM requests use their own interface described in phase-a.md.
 
 Errors return 401 for authentication, 409 for state/idempotency/lease conflicts, 422 for invalid inputs, and 503 with a safe `unconfirmed` response for database uncertainty. Raw driver bodies, passwords and SDK debug logs are not returned.
 
@@ -92,6 +92,6 @@ Migration setup is already applied and verified locally. For a new clone/project
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **156 passed, 5 skipped**, with no broken dependencies. Default tests without database opt-ins expect **120 passed, 41 skipped**. The integrity opt-in includes rollback-only owner/recovery tests plus independent-session concurrency tests. Concurrency requires briefly committed isolated fictional records, then exact-ID cleanup in `finally`; it never uses the original pending demo approval. Run these checks sequentially, not with pytest-xdist. The original five empty-database schema tests still require a separate TEST_DATABASE_URL.
+Expected: **222 passed, 5 skipped**, with no broken dependencies. Default tests without database opt-ins expect **152 passed, 75 skipped**. The integrity opt-in includes rollback-only owner/recovery tests plus independent-session concurrency tests. Concurrency requires briefly committed isolated fictional records, then exact-ID cleanup in `finally`; it never uses the original pending demo approval. Run these checks sequentially, not with pytest-xdist. The original five empty-database schema tests still require a separate TEST_DATABASE_URL.
 
 If a command fails, share the command, safe error JSON, run/approval ID and exit code. Never share `.env`, bearer credentials, database URIs/passwords or SDK debug logs. A pending approval is an intentional stop; review it instead of bypassing the guard.

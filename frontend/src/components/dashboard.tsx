@@ -42,7 +42,7 @@ function stepSummary(step: Step): string {
   if (step.status === "running") return "Waiting for the backend result…";
   switch (step.tool_name) {
     case "get_leads": return `${records(data.leads).length} leads returned${data.truncated ? " · results truncated" : ""}`;
-    case "get_property_matches": return `${records(data.matches).length} matching properties returned${data.truncated ? " · results truncated" : ""}`;
+    case "get_property_matches": return data.matching_ready === false ? "Matching requirements incomplete; no inventory conclusion." : `${records(data.matches).length} matching properties returned${data.truncated ? " · results truncated" : ""}`;
     case "get_available_slots": return `${records(data.slots).length} slots available at check time · booking requires a fresh check`;
     case "create_followup_draft": return `${data.created ? "Draft saved" : "Existing draft returned"} · no message sent`;
     case "request_approval": return `Review status: ${text(object(data.approval).status).replaceAll("_", " ")}`;
@@ -56,12 +56,17 @@ function Results({ run }: { run: Run | null }) {
   const steps = run?.live_steps ?? [];
   const leads = new Map<string, Record<string, unknown>>();
   const matches = new Map<string, Record<string, unknown>[]>();
+  const incompleteMatches = new Map<string, string>();
   const slots = new Map<string, Record<string, unknown>>();
   for (const step of steps) {
     if (step.status !== "succeeded") continue;
     const data = resultData(step);
     if (step.tool_name === "get_leads") for (const lead of records(data.leads)) leads.set(text(lead.id), lead);
-    if (step.tool_name === "get_property_matches") matches.set(text(data.lead_id), records(data.matches));
+    if (step.tool_name === "get_property_matches") {
+      const id=text(data.lead_id);matches.set(id,records(data.matches));
+      if(data.matching_ready===false) incompleteMatches.set(id,[...(Array.isArray(data.missing_fields)?data.missing_fields:[]),...(Array.isArray(data.invalid_fields)?data.invalid_fields:[])].map(text).map(value=>value.replaceAll('_',' ')).join(', '));
+      else incompleteMatches.delete(id);
+    }
     if (step.tool_name === "get_available_slots") { slots.clear(); for (const slot of records(data.slots)) slots.set(text(slot.id), slot); }
   }
   return <section className="panel results-panel" id="results" aria-labelledby="results-heading">
@@ -70,9 +75,9 @@ function Results({ run }: { run: Run | null }) {
       <div className="lead-grid">{[...new Set([...leads.keys(), ...matches.keys()])].map(id => {
         const lead = leads.get(id); const properties = matches.get(id);
         return <article className="lead-card" key={id}>
-          <div className="lead-title"><span className="avatar">{text(lead?.name).slice(0, 1) || "L"}</span><div><h3>{text(lead?.name) || `Lead ${id.slice(0, 8)}`}</h3><p>{lead ? `${text(lead.bedrooms)} bed · ${money(lead.budget_min)} – ${money(lead.budget_max)}` : "Lead details not returned in this run"}</p></div></div>
-          {lead && <p className="locality">{Array.isArray(lead.preferred_localities) ? lead.preferred_localities.join(" / ") : "Locality not returned"}</p>}
-          {properties === undefined ? <p className="muted-result">Matches not checked in this run</p> : !properties.length ? <p className="no-match">No properties met the checked criteria.</p> : properties.map(property => <div className="property" key={text(property.id)}><div><strong>{text(property.title)}</strong><span>{text(property.locality)} · {text(property.bedrooms)} bedrooms</span></div><div className="property-price"><strong>{money(property.price)}</strong><span>Fit score {text(property.score)}/100</span></div></div>)}
+          <div className="lead-title"><span className="avatar">{text(lead?.name).slice(0, 1) || "L"}</span><div><h3>{text(lead?.name) || `Lead ${id.slice(0, 8)}`}</h3><p>{lead ? `${lead.bedrooms==null?"Bedrooms unknown":text(lead.bedrooms)+" bed"} · ${money(lead.budget_min)} – ${money(lead.budget_max)}` : "Lead details not returned in this run"}</p></div></div>
+          {lead && <p className="locality">{Array.isArray(lead.preferred_localities) ? lead.preferred_localities.join(" / ") : lead.preferred_localities===null?"Locality not answered":"Locality not returned"}</p>}
+          {incompleteMatches.has(id) ? <p className="no-match">Matching requirements incomplete: {incompleteMatches.get(id)||"review the recorded answers"}.</p> : properties === undefined ? <p className="muted-result">Matches not checked in this run</p> : !properties.length ? <p className="no-match">No properties met the checked criteria.</p> : properties.map(property => <div className="property" key={text(property.id)}><div><strong>{text(property.title)}</strong><span>{text(property.locality)} · {text(property.bedrooms)} bedrooms</span></div><div className="property-price"><strong>{money(property.price)}</strong><span>Ranking score {text(property.score)}</span></div></div>)}
         </article>;
       })}</div>}
     {steps.some(step => step.tool_name === "get_available_slots" && step.status === "succeeded") && <div className="slots"><h3>Latest visit options <span>Availability is provisional</span></h3>{slots.size ? <div className="slot-grid">{[...slots.values()].map(slot => <span key={text(slot.id)}>{date(slot.starts_at)} <small>to {date(slot.ends_at)}</small></span>)}</div> : <p className="subtle">No slots were returned for the checked window.</p>}</div>}

@@ -4,6 +4,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from app.qualification import Timeframe
 
 
 class Input(BaseModel):
@@ -79,18 +80,27 @@ class Lead(BaseModel):
     id: UUID
     name: str
     email: str
-    preferred_localities: list[str]
-    budget_min: Decimal
-    budget_max: Decimal
-    bedrooms: int
+    preferred_localities: list[str] | None
+    budget_min: Decimal | None
+    budget_max: Decimal | None
+    bedrooms: int | None
     status: Literal["new", "contacted", "qualified", "closed"]
     notes: str
+    purchase_timeframe: Timeframe | None = None
+    qualification: dict[str, Any] | None = None
     created_at: datetime
 
 
 class LeadsOutput(BaseModel):
     leads: list[Lead]
     truncated: bool
+
+
+class MatchCheck(BaseModel):
+    criterion: Literal["active", "budget", "locality", "minimum_bedrooms"]
+    requested: Any
+    actual: Any
+    passed: Literal[True]
 
 
 class PropertyMatch(BaseModel):
@@ -101,11 +111,19 @@ class PropertyMatch(BaseModel):
     bedrooms: int
     description: str
     score: int
+    version: int
     reasons: list[str]
+    checks: list[MatchCheck]
 
 
 class MatchesOutput(BaseModel):
     lead_id: UUID
+    lead_version: int
+    checked_at: datetime
+    matching_ready: bool
+    missing_fields: list[str]
+    invalid_fields: list[str]
+    criteria_snapshot: dict[str, Any]
     matches: list[PropertyMatch]
     truncated: bool
     criteria: str = "Active inventory within budget, preferred locality, and at least requested bedrooms; exact bedrooms first, then lowest price."

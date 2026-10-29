@@ -35,7 +35,7 @@ def found(row):
 
 
 SORTS={
- 'leads':{'created_desc':'e.created_at DESC','name_asc':'e.name ASC','name_desc':'e.name DESC','budget_desc':'e.budget_max DESC'},
+ 'leads':{'created_desc':'e.created_at DESC','name_asc':'e.name ASC','name_desc':'e.name DESC','budget_desc':'e.budget_max DESC NULLS LAST'},
  'properties':{'created_desc':'e.created_at DESC','title_asc':'e.title ASC','price_asc':'e.price ASC','price_desc':'e.price DESC'},
  'appointments':{'starts_asc':'s.starts_at ASC','starts_desc':'s.starts_at DESC','created_desc':'e.created_at DESC'},
 }
@@ -53,14 +53,25 @@ class CRM:
             return found(conn.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',(key,)).fetchone())[0]
 
     def mutate(self,action,request,work):
+        from app.crm_schemas import LeadCreate, LeadUpdate
         data=request.model_dump(mode='json')
-        digest=payload_hash({'action':action,'arguments':data})
+        # Omitting a PATCH field preserves it; explicit null clears it. Bind that distinction.
+        legacy_digest=None
+        if isinstance(request,LeadCreate) and 'purchase_timeframe' not in request.model_fields_set:
+            data.pop('purchase_timeframe',None)
+        identity={'action':action,'arguments':data}
+        if isinstance(request,LeadUpdate):
+            if 'purchase_timeframe' not in request.model_fields_set:
+                legacy_digest=payload_hash(identity)
+            identity['provided_fields']=sorted(request.model_fields_set)
+        digest=payload_hash(identity)
         try:
             with self.connect() as conn:
                 conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",('crm:'+request.request_key,))
                 prior=conn.execute('SELECT fingerprint,response FROM soloestate.crm_operations WHERE request_key=%s',(request.request_key,)).fetchone()
                 if prior:
-                    if prior[0]!=digest: raise CRMError('Request key already belongs to a different operation.')
+                    legacy_replay=legacy_digest==prior[0] and 'purchase_timeframe' not in prior[1].get('record',{})
+                    if prior[0]!=digest and not legacy_replay: raise CRMError('Request key already belongs to a different operation.')
                     response=prior[1]
                 else:
                     response=encode(work(conn))
@@ -130,6 +141,9 @@ class CRM:
                 else:
                     row=cur.execute(sql.SQL('SELECT * FROM soloestate.{} WHERE id=%s').format(sql.Identifier(TABLES[entity])),(identifier,)).fetchone()
                 result={'record':found(row)}
+                if entity=='leads':
+                    from app.qualification import readiness
+                    result['qualification']=readiness(row)
                 if entity in ('leads','properties'):
                     column='lead_id' if entity=='leads' else 'property_id'
                     result['appointments']=cur.execute(f'SELECT {APPOINTMENT_SELECT} FROM {APPOINTMENT_FROM} WHERE e.{column}=%s ORDER BY s.starts_at DESC LIMIT 20',(identifier,)).fetchall()
@@ -138,7 +152,7 @@ class CRM:
         return encode(result)
 
     def save(self,entity,request,identifier=None):
-        columns={'leads':('name','email','preferred_localities','budget_min','budget_max','bedrooms','status','notes'),
+        columns={'leads':('name','email','preferred_localities','budget_min','budget_max','bedrooms','status','notes','purchase_timeframe'),
                  'properties':('title','locality','price','bedrooms','description','active')}[entity]
         def work(conn):
             with conn.cursor(row_factory=dict_row) as cur:
@@ -150,13 +164,27 @@ class CRM:
                     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",('email:'+request.email,))
                     duplicate=cur.execute('SELECT id FROM soloestate.leads WHERE lower(email)=%s AND id<>%s',(request.email,identifier or uuid4())).fetchone()
                     if duplicate: raise CRMError('A lead already uses this email.')
-                values=[getattr(request,key) for key in columns]
+                values=[(current[key] if identifier and entity=='leads' and key not in request.model_fields_set else getattr(request,key)) for key in columns]
+                if entity=='leads':
+                    merged=dict(zip(columns,values))
+                    if merged['budget_min'] is not None and merged['budget_max'] is not None and merged['budget_max']<merged['budget_min']:
+                        raise CRMError('Maximum budget must cover minimum budget.',422)
+                write_columns=list(columns)
+                if identifier and entity=='leads':
+                    from app.qualification import facts
+                    if facts(current)!=facts({**current,**dict(zip(columns,values))}):
+                        if current['archived_at'] is not None: raise CRMError('Restore the lead before changing qualification requirements.')
+                        write_columns.append('qualification_fingerprint');values.append(None)
                 if identifier:
-                    query=sql.SQL('UPDATE soloestate.{} SET {} WHERE id=%s RETURNING *').format(sql.Identifier(entity),sql.SQL(',').join(sql.SQL('{}=%s').format(sql.Identifier(key)) for key in columns))
+                    query=sql.SQL('UPDATE soloestate.{} SET {} WHERE id=%s RETURNING *').format(sql.Identifier(entity),sql.SQL(',').join(sql.SQL('{}=%s').format(sql.Identifier(key)) for key in write_columns))
                     row=cur.execute(query,[*values,identifier]).fetchone()
                 else:
                     query=sql.SQL('INSERT INTO soloestate.{} (id,{}) VALUES (%s,{}) RETURNING *').format(sql.Identifier(entity),sql.SQL(',').join(map(sql.Identifier,columns)),sql.SQL(',').join(sql.Placeholder() for _ in columns))
                     row=cur.execute(query,[uuid4(),*values]).fetchone()
+                if entity=='leads' and identifier:
+                    from app.qualification import facts, activity
+                    if facts(current)!=facts(row):
+                        activity(cur,current,row,'Owner updated qualification requirements',request.request_key)
                 return {'record':row}
         return self.mutate(f'{entity}:{identifier or "create"}',request,work)
 

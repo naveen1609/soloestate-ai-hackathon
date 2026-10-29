@@ -18,3 +18,16 @@ it('rejects cross-origin CRM writes before reaching FastAPI',async()=>{
 it('rejects arbitrary query fields rather than creating a generic proxy',async()=>{
  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);expect((await GET(request('crm/leads?sql=DROP','GET'),{params:Promise.resolve({path:['crm','leads']})})).status).toBe(400);expect(fetch).not.toHaveBeenCalled();
 });
+
+it.each([['GET','crm/leads/'+ID+'/activities'],['POST','crm/leads/'+ID+'/journey']])('permits B1 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['PATCH','crm/leads/'+ID+'/journey'],['POST','crm/leads/'+ID+'/activities'],['GET','crm/leads/'+ID+'/consent']])('rejects unregistered B1 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+
+
+it.each([['GET','crm/leads/'+ID+'/matches'],['POST','crm/leads/'+ID+'/qualify']])('permits B2 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['PATCH','crm/leads/'+ID+'/qualify'],['POST','crm/leads/'+ID+'/matches'],['POST','crm/qualify_all']])('rejects unregistered B2 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+it('allows only the explicit match limit query',async()=>{
+ const fetch=vi.fn(async()=>Response.json({matches:[]}));vi.stubGlobal('fetch',fetch);
+ const context={params:Promise.resolve({path:['crm','leads',ID,'matches']})};
+ expect((await GET(request('crm/leads/'+ID+'/matches?limit=5','GET'),context)).status).toBe(200);
+ expect((await GET(request('crm/leads/'+ID+'/matches?override_budget=1','GET'),context)).status).toBe(400);
+});

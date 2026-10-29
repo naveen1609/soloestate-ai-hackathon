@@ -77,7 +77,7 @@ Unit/default suite (database cases skip without opt-ins):
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Expected: **128 passed, 55 skipped**.
+Expected: **152 passed, 75 skipped**.
 
 Full suite including rollback-only real Supabase tool and orchestration tests:
 
@@ -86,7 +86,7 @@ Full suite including rollback-only real Supabase tool and orchestration tests:
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Expected: **178 passed, 5 skipped** and no broken dependencies. The five remaining skips are the original dedicated-empty-database schema tests. The new agent tests mock provider responses, but use real PostgreSQL tools and persistence inside forced-rollback transactions. They verify persisted plans/steps, result-driven recovery, approval stopping with a real draft ID, duplicate worker/replay behavior, and atomic rollback when evidence persistence fails. The separately executed live demo uses the real model and retains its fictional draft/approval for review.
+Expected: **222 passed, 5 skipped** and no broken dependencies. The five remaining skips are the original dedicated-empty-database schema tests. The new agent tests mock provider responses, but use real PostgreSQL tools and persistence inside forced-rollback transactions. They verify persisted plans/steps, result-driven recovery, approval stopping with a real draft ID, duplicate worker/replay behavior, and atomic rollback when evidence persistence fails. The separately executed live demo uses the real model and retains its fictional draft/approval for review.
 
 Only agent persistence tests:
 
