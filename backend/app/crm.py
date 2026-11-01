@@ -57,7 +57,8 @@ class CRM:
         with self.connect() as conn:
             return found(conn.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',(key,)).fetchone())[0]
 
-    def mutate(self,action,request,work):
+    def mutate(self,action,request,work,actor='owner'):
+        if actor not in ('owner','visitor'): raise ValueError('Invalid actor.')
         from app.crm_schemas import LeadCreate, LeadUpdate, TaskUpdate, OutcomeUpdate
         data=request.model_dump(mode='json')
         # Omitting a PATCH field preserves it; explicit null clears it. Bind that distinction.
@@ -82,8 +83,8 @@ class CRM:
                     response=prior[1]
                 else:
                     response=encode(work(conn))
-                    conn.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) VALUES (%s,%s,%s,'owner',%s,%s)",
-                        (request.request_key,action,digest,response['record']['id'],Jsonb(response)))
+                    conn.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) VALUES (%s,%s,%s,%s,%s,%s)",
+                        (request.request_key,action,digest,actor,response['record']['id'],Jsonb(response)))
             # Never acknowledge a mutation before the outer connection commits.
             return response
         except psycopg.IntegrityError:
@@ -161,11 +162,23 @@ class CRM:
                     result['followups']=cur.execute('SELECT id,subject,status,version,created_at FROM soloestate.followup_drafts WHERE lead_id=%s ORDER BY created_at DESC LIMIT 20',(identifier,)).fetchall()
         return encode(result)
 
-    def save(self,entity,request,identifier=None):
+    def save(self,entity,request,identifier=None,actor='owner',freeze_conversation_id=None):
         columns={'leads':('name','email','preferred_localities','budget_min','budget_max','bedrooms','status','notes','purchase_timeframe'),
                  'properties':('title','locality','price','bedrooms','description','active')}[entity]
         def work(conn):
             with conn.cursor(row_factory=dict_row) as cur:
+                if identifier:
+                    if freeze_conversation_id is not None:
+                        # Shared locks first: owner review/handoff take the conversation lock first too,
+                        # so they serialize here instead of deadlocking.
+                        convo = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s FOR SHARE',
+                                                  (freeze_conversation_id,)).fetchone())
+                        if convo['status'] == 'resolved':
+                            raise CRMError('This chat is resolved. New visitor changes are disabled.')
+                        frozen = found(cur.execute('SELECT archived_at FROM soloestate.leads WHERE id=%s FOR SHARE',
+                                                   (convo['lead_id'],)).fetchone())
+                        if frozen['archived_at'] is not None:
+                            raise CRMError('This chat is no longer available.', 422)
                 if identifier:
                     current=found(cur.execute(sql.SQL('SELECT * FROM soloestate.{} WHERE id=%s FOR UPDATE').format(sql.Identifier(entity)),(identifier,)).fetchone())
                     if current['version']!=request.expected_version: raise CRMError('Record changed. Reload before editing.')
@@ -194,9 +207,9 @@ class CRM:
                 if entity=='leads' and identifier:
                     from app.qualification import facts, activity
                     if facts(current)!=facts(row):
-                        activity(cur,current,row,'Owner updated qualification requirements',request.request_key)
+                        activity(cur,current,row,'Owner updated qualification requirements' if actor=='owner' else 'Visitor updated chat requirements',request.request_key,actor)
                 return {'record':row}
-        return self.mutate(f'{entity}:{identifier or "create"}',request,work)
+        return self.mutate(f'{entity}:{identifier or "create"}',request,work,actor)
 
     def archive(self,identifier,request):
         def work(conn):

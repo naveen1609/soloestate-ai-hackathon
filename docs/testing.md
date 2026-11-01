@@ -150,3 +150,18 @@ From backend:
 Apply additive migration 0009 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish.
 
 Frontend: outcome/follow-up appointment UI cases in crm.test.tsx, BFF allowlist cases pinning the outcome path and query, and the expanded real CRM browser workflow (no-show with fresh rebook, reschedule lineage, completion with next action, history and filter checks, plus retained cancel coverage). Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Exact cleanup covers the additional fixture bookings, slots, activities and operations by lead. Final evidence is in [phase-b5-verification.md](phase-b5-verification.md). No live model, scheduler, notification or external delivery is enabled by these commands.
+
+## Phase C coverage and commands
+
+New backend files: test_chat.py and test_chat_database.py. They cover strict visitor-token validation and fail-closed misconfiguration, conversation-scoped authorization with cross-conversation and owner/chat credential cross-use rejection, isolated lead creation with collision-alias privacy (no existence oracle, archived and repeat submissions), visitor actor provenance with owner-message compatibility, migration-0010 compatibility, versioned/idempotent writes with exact replay and changed-payload conflicts, the 30/hour rate cap including replay at the limit, concurrent-send and crash-recovery single-reply behavior, validated requirements capture with deterministic matching, provisional availability, visit-interest messages with no booking/approval/consent authority, grounded versus unsupported answers with model timeouts/failures, and handoff/resolution freeze gates. Acceptance corrections added lock-held freeze enforcement with real owner review actions and concurrent serialization, pre-persistence send gates with saved-message disclosure and zero-inference blocks, token-scoped property context with scope revalidation and pinned citations, draft-claim inference counting with barrier/disconnect/failure recovery, and executed actor-constraint/RLS/FK/rollback checks. Chat database fixtures roll back except the concurrency/crash cases, which commit on separate connections and delete by exact ID at teardown.
+
+From backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_chat.py tests/test_chat_database.py --run-integrity-db-tests
+.\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
+```
+
+Apply additive migration 0010 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish. The chat browser journey needs VISITOR_TOKEN_SECRET configured on the verification backend only (process environment for the run is enough); the token secret is never printed, committed or stored in fixtures.
+
+Frontend: /chat page cases in chat.test.tsx (capture, requirements, matches, availability, send, handoff, token rejection), BFF allowlist cases in chat.test.ts pinning the fixed chat paths with cookie auth and same-origin mutation rules, and the fictional chat browser journey in e2e/chat.spec.ts with exact-prefix cleanup in chat_fixture.py. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Final evidence is in [phase-c-verification.md](phase-c-verification.md). No live messaging, scheduler, autonomous booking or external delivery is enabled by these commands.

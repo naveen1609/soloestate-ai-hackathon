@@ -87,6 +87,51 @@ def test_booking_uniqueness_and_approval_binding(db):
     db.execute(insert, (uuid4(), run, approvals[1], lead, slot, prop, "booking-2"))
 
 
+def test_visitor_actor_migration_applies_on_fresh_database(db):
+    versions = [row[0] for row in db.execute('SELECT version FROM soloestate.schema_migrations ORDER BY version').fetchall()]
+    assert len(versions) == 10 and versions[-1] == '0010_visitor_actor.sql'
+    for table in ('crm_operations', 'lead_activities'):
+        definition = db.execute('SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=%s',
+                                (f'{table}_actor_check',)).fetchone()[0]
+        assert "'owner'" in definition and "'visitor'" in definition
+    db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
+               "VALUES ('legacy-owner','probe','probe','owner',%s,'{}')", (uuid4(),))
+    db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
+               "VALUES ('legacy-visitor','probe','probe','visitor',%s,'{}')", (uuid4(),))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        with db.transaction():
+            db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
+                       "VALUES ('legacy-third','probe','probe','agent',%s,'{}')", (uuid4(),))
+    assert db.execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key='legacy-third'").fetchone()[0] == 0
+    lead, convo = uuid4(), uuid4()
+    db.execute('INSERT INTO soloestate.leads(id,name,email) VALUES (%s,%s,%s)', (lead, 'C migration', 'c-migration@example.invalid'))
+    db.execute('INSERT INTO soloestate.conversations(id,lead_id) VALUES (%s,%s)', (convo, lead))
+    db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
+               "VALUES ('chain-op','probe','probe','visitor',%s,'{}')", (uuid4(),))
+    message = db.execute('INSERT INTO soloestate.conversation_messages(conversation_id,role,body,request_key) '
+                         "VALUES (%s,'customer','Hello','chain-op') RETURNING id", (convo,)).fetchone()[0]
+    db.execute("INSERT INTO soloestate.lead_activities(lead_id,actor,reason,before_state,after_state,request_key) "
+               "VALUES (%s,'visitor','probe','{}','{}','chain-op')", (lead,))
+    joined = db.execute("""SELECT m.id FROM soloestate.conversation_messages m
+        JOIN soloestate.crm_operations o ON o.request_key=m.request_key
+        JOIN soloestate.lead_activities a ON a.request_key=o.request_key
+        WHERE m.id=%s AND o.actor='visitor' AND a.actor='visitor'""", (message,)).fetchone()
+    assert joined[0] == message
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        with db.transaction():
+            db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
+                       "VALUES ('rollback-op','probe','probe','visitor',%s,'{}')", (uuid4(),))
+            db.execute("INSERT INTO soloestate.lead_activities(lead_id,actor,reason,before_state,after_state,request_key) "
+                       "VALUES (%s,'visitor','probe','{}','{}','rollback-op')", (uuid4(),))
+    assert db.execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key='rollback-op'").fetchone()[0] == 0
+    secured = db.execute("SELECT relname FROM pg_class WHERE relnamespace='soloestate'::regnamespace AND relname IN "
+                         "('crm_operations','lead_activities') AND relrowsecurity").fetchall()
+    assert {row[0] for row in secured} == {'crm_operations', 'lead_activities'}
+    public = db.execute("SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='PUBLIC' AND "
+                        "table_schema='soloestate' AND table_name IN ('crm_operations','lead_activities')").fetchone()[0]
+    assert public == 0
+
+
 def test_rls_enabled_and_no_public_schema_access(db):
     rows = db.execute("""SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='soloestate' AND c.relkind='r'""").fetchall()

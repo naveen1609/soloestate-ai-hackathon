@@ -45,15 +45,17 @@ def reviewed_fingerprint(lead):
     return fingerprint(lead)
 
 
-def activity(cur, before, after, reason, request_key):
+def activity(cur, before, after, reason, request_key, actor='owner'):
     from psycopg.types.json import Jsonb
     from app.journey import FIELDS
+    if actor not in ('owner', 'visitor'):
+        raise ValueError('Invalid actor.')
     def snapshot(lead):
         return {**{field: lead[field] for field in FIELDS}, 'qualification': facts(lead),
                 'qualification_fingerprint': lead.get('qualification_fingerprint')}
     cur.execute("""INSERT INTO soloestate.lead_activities(lead_id,actor,reason,before_state,after_state,request_key)
-        VALUES (%s,'owner',%s,%s,%s,%s)""",
-        (after['id'], reason, Jsonb(snapshot(before)), Jsonb(snapshot(after)), request_key))
+        VALUES (%s,%s,%s,%s,%s,%s)""",
+        (after['id'], actor, reason, Jsonb(snapshot(before)), Jsonb(snapshot(after)), request_key))
 
 
 def confirm(crm, identifier, request):

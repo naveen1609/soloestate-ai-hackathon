@@ -45,3 +45,4 @@ class Settings(BaseSettings):
     agent_max_failures: int = Field(default=3, ge=1, le=5)
     agent_timeout_seconds: float = Field(default=180, ge=10, le=600, allow_inf_nan=False)
     owner_api_token: SecretStr | None = None
+    visitor_token_secret: SecretStr | None = None

@@ -1,4 +1,6 @@
 """Lead-linked simulated conversations with validated grounded answers. No delivery."""
+import asyncio
+import time
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -12,6 +14,8 @@ MAX_ASSEMBLED_BODY = 5000  # mirrors the conversation_messages body CHECK
 HANDOFF = {'none': {'requested'}, 'requested': {'resolved'}, 'resolved': {'requested'}}
 REVIEW = {('pending_owner', 'acknowledge'): 'open', ('open', 'resolve'): 'resolved',
           ('pending_owner', 'resolve'): 'resolved', ('resolved', 'reopen'): 'open'}
+CLAIM_WAIT_SECONDS = 120
+CLAIM_POLL_SECONDS = 0.05
 
 
 class Citation(BaseModel):
@@ -106,12 +110,14 @@ def gate(record):
         raise CRMError('Reopen the conversation before drafting.')
 
 
-def log_activity(cur, before, after, reason, request_key):
+def log_activity(cur, before, after, reason, request_key, actor='owner'):
     from psycopg.types.json import Jsonb
+    if actor not in ('owner', 'visitor'):
+        raise ValueError('Invalid actor.')
     snap = lambda row: None if row is None else {'conversation': {'id': str(row['id']), 'status': row['status'],
                                                                  'handoff_state': row['handoff_state']}}
     cur.execute("""INSERT INTO soloestate.lead_activities(lead_id,actor,reason,before_state,after_state,request_key)
-        VALUES (%s,'owner',%s,%s,%s,%s)""", (after['lead_id'], reason, Jsonb(snap(before)), Jsonb(snap(after)), request_key))
+        VALUES (%s,%s,%s,%s,%s,%s)""", (after['lead_id'], actor, reason, Jsonb(snap(before)), Jsonb(snap(after)), request_key))
 
 
 def open_conversation(crm, request):
@@ -181,7 +187,7 @@ def detail(crm, identifier):
     return encode({'record': record, 'messages': messages, 'truncated': truncated, 'drafting_blocked': blocked_reason(record)})
 
 
-def append(crm, identifier, request):
+def append(crm, identifier, request, actor='owner', rate_limit_per_hour=None, visitor_send=False):
     from app.crm import CRMError, found
     from psycopg.rows import dict_row
     def work(conn):
@@ -189,6 +195,14 @@ def append(crm, identifier, request):
             convo = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s FOR UPDATE', (identifier,)).fetchone())
             if convo['version'] != request.expected_version:
                 raise CRMError('Record changed. Reload before messaging.')
+            if visitor_send:
+                gate(convo)
+            if rate_limit_per_hour is not None:
+                sent = cur.execute("""SELECT count(*) AS sent FROM soloestate.conversation_messages
+                    WHERE conversation_id=%s AND role='customer' AND created_at > clock_timestamp() - interval '1 hour'""",
+                    (identifier,)).fetchone()['sent']
+                if sent >= rate_limit_per_hour:
+                    raise CRMError('Chat is rate limited. Try again later.', 429)
             if convo['status'] == 'resolved':
                 raise CRMError('Reopen the conversation before messaging.')
             lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE', (convo['lead_id'],)).fetchone())
@@ -205,79 +219,110 @@ def append(crm, identifier, request):
                 VALUES (%s,%s,%s,%s,%s) RETURNING *""",
                 (identifier, request.role, request.body.strip(), request.supersedes_message_id, request.request_key)).fetchone()
             return {'record': row}
-    return crm.mutate(f'conversation:message:{identifier}', request, work)
+    return crm.mutate(f'conversation:message:{identifier}', request, work, actor)
 
 
-async def draft(crm, identifier, request, model):
+async def draft(crm, identifier, request, model, actor='owner'):
     from app.crm import CRMError, found
     from psycopg.rows import dict_row
     from psycopg.types.json import Jsonb
     from app.faq import retrieve
     from app.owner import payload_hash
     identity = {'action': f'conversation:draft:{identifier}', 'arguments': request.model_dump(mode='json')}
-    with crm.connect() as conn:
-        prior = conn.execute('SELECT fingerprint,response FROM soloestate.crm_operations WHERE request_key=%s', (request.request_key,)).fetchone()
-        if prior:
-            if prior[0] != payload_hash(identity):
-                raise CRMError('Request key already belongs to a different operation.')
-            return prior[1]
-        with conn.cursor(row_factory=dict_row) as cur:
-            convo = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (identifier,)).fetchone())
-            if convo['version'] != request.expected_version:
-                raise CRMError('Record changed. Reload before drafting.')
-            gate(convo)
-            lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s', (convo['lead_id'],)).fetchone())
-            if lead['archived_at'] is not None:
-                raise CRMError('Restore the lead before drafting.', 422)
-            target = found(cur.execute('SELECT * FROM soloestate.conversation_messages WHERE id=%s AND conversation_id=%s',
-                                       (request.message_id, identifier)).fetchone())
-            if target['role'] != 'customer':
-                raise CRMError('Drafts answer simulated customer messages.', 422)
-            retrieved = retrieve(cur, convo, target['body'])
-    from app.services.meta_model import ModelServiceError
-    try:
-        result = await model.generate(draft_prompt(retrieved, target['body']))
-    except ModelServiceError as exc:
-        result, candidate, failure = None, None, 'inference_timeout' if exc.code == 'timeout' else 'inference_failed'
-    else:
+    # Session-level claim on the draft key: concurrent same-key retries wait here, then replay
+    # the committed row without inference. Inference never begins unless this caller owns the
+    # claim: on wait expiry the caller replays a completed row after fingerprint validation, or
+    # fails retryably without touching rows or the claim. The claim session holds no row locks
+    # and no write transaction during inference; it releases in the finally block and on
+    # disconnect, so a failed claimant never blocks recovery. Lock order claim -> mutate -> rows
+    # is deadlock-free.
+    with crm.connect() as claim:
+        deadline = time.monotonic() + CLAIM_WAIT_SECONDS
+        held = False
+        while not held and time.monotonic() < deadline:
+            held = claim.execute('SELECT pg_try_advisory_lock(hashtextextended(%s, 0))',
+                                 ('draft-claim:' + request.request_key,)).fetchone()[0]
+            if not held:
+                await asyncio.sleep(CLAIM_POLL_SECONDS)
         try:
-            candidate = parse_candidate(result.text)
-        except InvalidDraft:
-            result, candidate, failure = result, None, 'invalid_response'
-        else:
-            failure = None
-    def work(conn):
-        with conn.cursor(row_factory=dict_row) as cur:
-            before = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s FOR UPDATE', (identifier,)).fetchone())
-            if before['version'] != request.expected_version:
-                raise CRMError('Record changed. Reload before drafting.')
-            gate(before)
-            lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE', (before['lead_id'],)).fetchone())
-            if lead['archived_at'] is not None:
-                raise CRMError('Restore the lead before drafting.', 422)
-            reason = failure or validate_citations(cur, retrieved, candidate)
-            if reason is None:
-                try:
-                    body = assemble_grounded(candidate.citations)
-                except ValueError:
-                    reason = 'invalid_response'
-            if reason is None:
-                grounding, citations, confidence, after = 'grounded', \
-                    [citation.model_dump(mode='json') for citation in candidate.citations], candidate.confidence, before
+            if not held:
+                with crm.connect() as conn:
+                    late = conn.execute('SELECT fingerprint,response FROM soloestate.crm_operations WHERE request_key=%s', (request.request_key,)).fetchone()
+                    if late is None:
+                        raise CRMError('Another draft is in progress for this message. Retry the same saved request; no new result is confirmed.', 503)
+                    if late[0] != payload_hash(identity):
+                        raise CRMError('Request key already belongs to a different operation.')
+                    return late[1]
+            with crm.connect() as conn:
+                prior = conn.execute('SELECT fingerprint,response FROM soloestate.crm_operations WHERE request_key=%s', (request.request_key,)).fetchone()
+                if prior:
+                    if prior[0] != payload_hash(identity):
+                        raise CRMError('Request key already belongs to a different operation.')
+                    return prior[1]
+                with conn.cursor(row_factory=dict_row) as cur:
+                    convo = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (identifier,)).fetchone())
+                    if convo['version'] != request.expected_version:
+                        raise CRMError('Record changed. Reload before drafting.')
+                    gate(convo)
+                    lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s', (convo['lead_id'],)).fetchone())
+                    if lead['archived_at'] is not None:
+                        raise CRMError('Restore the lead before drafting.', 422)
+                    target = found(cur.execute('SELECT * FROM soloestate.conversation_messages WHERE id=%s AND conversation_id=%s',
+                                               (request.message_id, identifier)).fetchone())
+                    if target['role'] != 'customer':
+                        raise CRMError('Drafts answer simulated customer messages.', 422)
+                    retrieved = retrieve(cur, convo, target['body'])
+                    scoped_property = convo['property_id']
+            from app.services.meta_model import ModelServiceError
+            try:
+                result = await model.generate(draft_prompt(retrieved, target['body']))
+            except ModelServiceError as exc:
+                result, candidate, failure = None, None, 'inference_timeout' if exc.code == 'timeout' else 'inference_failed'
             else:
-                body, grounding, citations, confidence = FIXED_UNSUPPORTED_BODY, 'unsupported', [], None
-                after = cur.execute("UPDATE soloestate.conversations SET status='pending_owner' WHERE id=%s RETURNING *",
-                                    (identifier,)).fetchone()
-                log_activity(cur, before, after, 'Assistant answer needs owner review', request.request_key)
-            row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,role,body,grounding,unsupported_reason,
-                citations,confidence,model_name,response_id,request_key) VALUES (%s,'assistant',%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                (identifier, body, grounding, reason, Jsonb(citations), confidence,
-                 result.model if result else None, result.response_id if result else None, request.request_key)).fetchone()
-            return {'record': row, 'conversation': after}
-    return crm.mutate(f'conversation:draft:{identifier}', request, work)
+                try:
+                    candidate = parse_candidate(result.text)
+                except InvalidDraft:
+                    result, candidate, failure = result, None, 'invalid_response'
+                else:
+                    failure = None
+            def work(conn):
+                with conn.cursor(row_factory=dict_row) as cur:
+                    before = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s FOR UPDATE', (identifier,)).fetchone())
+                    if before['property_id'] != scoped_property:
+                        raise CRMError('Property focus changed during drafting. Resend to answer under the new focus.')
+                    if before['version'] != request.expected_version:
+                        raise CRMError('Record changed. Reload before drafting.')
+                    gate(before)
+                    lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE', (before['lead_id'],)).fetchone())
+                    if lead['archived_at'] is not None:
+                        raise CRMError('Restore the lead before drafting.', 422)
+                    reason = failure or validate_citations(cur, retrieved, candidate)
+                    if reason is None:
+                        try:
+                            body = assemble_grounded(candidate.citations)
+                        except ValueError:
+                            reason = 'invalid_response'
+                    if reason is None:
+                        grounding, citations, confidence, after = 'grounded', \
+                            [citation.model_dump(mode='json') for citation in candidate.citations], candidate.confidence, before
+                    else:
+                        body, grounding, citations, confidence = FIXED_UNSUPPORTED_BODY, 'unsupported', [], None
+                        after = cur.execute("UPDATE soloestate.conversations SET status='pending_owner' WHERE id=%s RETURNING *",
+                                            (identifier,)).fetchone()
+                        log_activity(cur, before, after, 'Assistant answer needs owner review', request.request_key, actor)
+                    row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,role,body,grounding,unsupported_reason,
+                        citations,confidence,model_name,response_id,request_key) VALUES (%s,'assistant',%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                        (identifier, body, grounding, reason, Jsonb(citations), confidence,
+                         result.model if result else None, result.response_id if result else None, request.request_key)).fetchone()
+                    return {'record': row, 'conversation': after}
+            return crm.mutate(f'conversation:draft:{identifier}', request, work, actor)
+        finally:
+            if held:
+                claim.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))',
+                              ('draft-claim:' + request.request_key,))
 
 
-def handoff(crm, identifier, request):
+def handoff(crm, identifier, request, actor='owner', visitor_freeze=False):
     from app.crm import CRMError, found
     from psycopg.rows import dict_row
     def work(conn):
@@ -285,6 +330,8 @@ def handoff(crm, identifier, request):
             before = found(cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s FOR UPDATE', (identifier,)).fetchone())
             if before['version'] != request.expected_version:
                 raise CRMError('Record changed. Reload before changing handoff.')
+            if visitor_freeze and before['status'] == 'resolved':
+                raise CRMError('This chat is resolved. New visitor changes are disabled.')
             lead = found(cur.execute('SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE', (before['lead_id'],)).fetchone())
             if lead['archived_at'] is not None:
                 raise CRMError('Restore the lead before changing handoff.', 422)
@@ -293,9 +340,9 @@ def handoff(crm, identifier, request):
                 raise CRMError('Invalid handoff transition.')
             after = cur.execute('UPDATE soloestate.conversations SET handoff_state=%s WHERE id=%s RETURNING *',
                                 (target, identifier)).fetchone()
-            log_activity(cur, before, after, request.reason.strip(), request.request_key)
+            log_activity(cur, before, after, request.reason.strip(), request.request_key, actor)
             return {'record': after}
-    return crm.mutate(f'conversation:handoff:{identifier}', request, work)
+    return crm.mutate(f'conversation:handoff:{identifier}', request, work, actor)
 
 
 def review(crm, identifier, request):
