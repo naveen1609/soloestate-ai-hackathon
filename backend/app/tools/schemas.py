@@ -39,7 +39,7 @@ class GetMatchesInput(Input):
 
 
 class GetSlotsInput(Window):
-    pass
+    resource_id: UUID | None = None
 
 
 class DraftInput(Input):
@@ -56,11 +56,12 @@ class ApprovalInput(Input):
     lead_id: UUID | None = None
     property_id: UUID | None = None
     slot_id: UUID | None = None
+    resource_id: UUID | None = None
 
     @model_validator(mode="after")
     def target(self):
         if self.kind == "followup":
-            if self.draft_id is None or any(v is not None for v in (self.lead_id, self.property_id, self.slot_id)):
+            if self.draft_id is None or any(v is not None for v in (self.lead_id, self.property_id, self.slot_id, self.resource_id)):
                 raise ValueError("Followup approval requires only draft_id")
         elif self.draft_id is not None or any(v is None for v in (self.lead_id, self.property_id, self.slot_id)):
             raise ValueError("Booking approval requires lead_id, property_id and slot_id")
@@ -131,6 +132,7 @@ class MatchesOutput(BaseModel):
 
 class Slot(BaseModel):
     id: UUID
+    resource_id: UUID
     starts_at: datetime
     ends_at: datetime
 
@@ -184,6 +186,7 @@ class BookingRecord(BaseModel):
     lead_id: UUID
     property_id: UUID
     slot_id: UUID
+    resource_id: UUID
     status: Literal["confirmed", "cancelled"]
 
 

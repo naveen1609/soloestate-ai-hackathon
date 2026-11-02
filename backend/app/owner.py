@@ -48,13 +48,14 @@ class OwnerService:
                 "payload": row["payload"], "payload_hash": payload_hash(row["payload"])}
 
     def decide(self, approval_id: UUID, request: DecisionRequest):
+        from app.snapshots import build_followup_v1
         request = DecisionRequest.model_validate(request)
         with self.connect() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 target = cur.execute("SELECT run_id FROM soloestate.approvals WHERE id=%s", (approval_id,)).fetchone()
                 if target is None:
                     raise RunConflict("Approval was not found.")
-                # Consistent order: run -> approval -> draft/slot. Decisions cannot race an active worker.
+                # Consistent order: run -> approval -> draft/slot (resource inside snapshot). Decisions cannot race an active worker.
                 run = cur.execute("SELECT *,lease_until>clock_timestamp() AS active FROM soloestate.runs WHERE id=%s FOR UPDATE", (target["run_id"],)).fetchone()
                 row = cur.execute("SELECT * FROM soloestate.approvals WHERE id=%s FOR UPDATE", (approval_id,)).fetchone()
                 digest = payload_hash(row["payload"])
@@ -71,6 +72,9 @@ class OwnerService:
                     raise RunConflict("This approval no longer accepts an owner decision.")
                 draft = None
                 if row["kind"] == "followup":
+                    if row["payload"].get("snapshot_version", 1) != 1:
+                        # D1 produces no v2 followup approvals; D2 implements the v2 path with draft categories.
+                        raise RunConflict("Unsupported approval snapshot version.")
                     draft = cur.execute("SELECT * FROM soloestate.followup_drafts WHERE id=%s FOR UPDATE", (row["draft_id"],)).fetchone()
                     lead = cur.execute("SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE", (row["lead_id"],)).fetchone()
                     if request.decision == 'approved':
@@ -80,13 +84,18 @@ class OwnerService:
                             raise RunConflict(str(exc)) from None
                     if request.decision=='approved' and lead['archived_at'] is not None:
                         raise RunConflict('Lead is archived; restore it before approving a follow-up.')
-                    current = {"draft_id": str(draft["id"]), "lead_id": str(draft["lead_id"]), "version": draft["version"],
-                               "channel": draft["channel"], "recipient": lead["email"], "subject": draft["subject"], "body": draft["body"]}
+                    current = build_followup_v1(draft_id=draft["id"], lead_id=draft["lead_id"], version=draft["version"],
+                                                channel=draft["channel"], recipient=lead["email"],
+                                                subject=draft["subject"], body=draft["body"])
                     if request.decision == "approved" and (draft["status"] != "draft" or current != row["payload"]):
                         raise RunConflict("Draft details are stale; create a fresh draft and approval.")
                 elif request.decision == "approved":
                     try:
-                        current = _booking_snapshot(cur, row["lead_id"], row["property_id"], row["slot_id"])
+                        if row["payload"].get("snapshot_version", 1) == 2:
+                            current = _booking_snapshot(cur, row["lead_id"], row["property_id"], row["slot_id"],
+                                                        UUID(row["payload"]["resource_id"]))
+                        else:
+                            current = _booking_snapshot(cur, row["lead_id"], row["property_id"], row["slot_id"])
                     except ToolFailure as exc:
                         raise RunConflict(str(exc)) from None
                     if current != row["payload"]:

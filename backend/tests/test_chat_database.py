@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from threading import Barrier, Event, Thread
+from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
 
 import pytest
@@ -416,8 +417,11 @@ def test_matches_and_slots_scoped_to_own_lead(chat):
     found = chat_matches(b['crm'], cid)
     assert found['matching_ready'] is True and [match['id'] for match in found['matches']] == [prop['id']]
     assert found['lead_id'] == opened['lead']['id']
-    start = b['conn'].execute("SELECT greatest(coalesce(max(ends_at),clock_timestamp()),clock_timestamp())+interval '20 years' "
-                              'FROM soloestate.visit_slots').fetchone()[0]
+    base = b['conn'].execute("SELECT greatest(coalesce(max(ends_at),clock_timestamp()),clock_timestamp())+interval '20 years' "
+                               'FROM soloestate.visit_slots').fetchone()[0].astimezone(ZoneInfo('Asia/Kolkata'))
+    start = (base + timedelta(days=(2 - base.weekday()) % 7)).replace(hour=11, minute=0, second=0, microsecond=0)
+    if start <= base:
+        start += timedelta(days=7)
     slot = b['crm'].slot(SlotCreate(request_key=b['key'](), starts_at=start,
                                    ends_at=start + timedelta(minutes=30)))['record']
     window = chat_slots(b['crm'], start - timedelta(days=1), start + timedelta(days=1))

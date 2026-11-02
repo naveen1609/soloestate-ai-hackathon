@@ -35,7 +35,7 @@ Expected with no TEST_DATABASE_URL configured: **152 passed, 75 skipped**, plus 
 For an inspection that must not touch any database, explicitly exclude every database marker:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider -m "not database and not tools_database and not agent_database and not integrity_database"
+.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider -m "not database and not tools_database and not agent_database and not integrity_database and not d1_database"
 ```
 
 Expected: **152 passed, 75 deselected**. Do not run browser tests, owner login, migrate or seed commands as part of that read-only inspection: those operations can write session or business/setup records.
@@ -165,3 +165,15 @@ From backend:
 Apply additive migration 0010 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently. Run the browser suite after backend mutation suites finish. The chat browser journey needs VISITOR_TOKEN_SECRET configured on the verification backend only (process environment for the run is enough); the token secret is never printed, committed or stored in fixtures.
 
 Frontend: /chat page cases in chat.test.tsx (capture, requirements, matches, availability, send, handoff, token rejection), BFF allowlist cases in chat.test.ts pinning the fixed chat paths with cookie auth and same-origin mutation rules, and the fictional chat browser journey in e2e/chat.spec.ts with exact-prefix cleanup in chat_fixture.py. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Final evidence is in [phase-c-verification.md](phase-c-verification.md). No live messaging, scheduler, autonomous booking or external delivery is enabled by these commands.
+
+## D1 coverage and commands
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_policies.py
+.\.venv\Scripts\python.exe -m pytest -q tests/test_d1_database.py --run-integrity-db-tests
+.\.venv\Scripts\python.exe -m pytest -q --run-tool-db-tests --run-agent-db-tests --run-integrity-db-tests
+```
+
+Apply additive migration 0011 first on a new checkout/database; never reset or reseed existing data to test. Do not run independent database suites concurrently: several D1 concurrency tests commit and hold transactional locks. Run the browser suite after backend mutation suites finish. `test_d1_database.py` rows are marked `d1_database` and run under the integrity flag, rolled back by default with six committed cases using exact-ID cleanup.
+
+Frontend: policy.test.tsx and booking-requests.test.tsx page cases, BFF allowlist cases in crm.test.ts pinning the D1 owner paths and rejecting provider/delivery shapes, and the fictional policy browser journey in e2e/policy.spec.ts with exact-ID cleanup in policy_fixture.py. Run npm.cmd test, lint, typecheck, build, then test:e2e with the configured backend. Production frontend must be stopped before rebuilding. Final evidence is in [phase-d1-verification.md](phase-d1-verification.md). No provider integration, outbound delivery, scheduled execution or external service is enabled by these commands.

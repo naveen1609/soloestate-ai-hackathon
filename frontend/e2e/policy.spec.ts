@@ -1,0 +1,120 @@
+import {test,expect,Page} from '@playwright/test';
+import {execFileSync} from 'node:child_process';
+import {resolve} from 'node:path';
+
+test.use({timezoneId:'Asia/Kolkata'});
+const backend=resolve(process.cwd(),'../backend');
+const origin=process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000';
+function python(script:string,...args:string[]){return execFileSync(resolve(backend,'.venv/Scripts/python.exe'),['-c',`import runpy; runpy.run_path('../frontend/e2e/${script}.py',run_name='__main__')`,...args],{cwd:backend,encoding:'utf-8',windowsHide:true});}
+async function signIn(page:Page){
+ const value=JSON.parse(execFileSync(resolve(backend,'.venv/Scripts/python.exe'),['-m','scripts.dashboard_login'],{cwd:backend,encoding:'utf-8',windowsHide:true})) as {url:string};
+ const url=new URL(value.url),target=new URL(origin);url.host=target.host;url.protocol=target.protocol;
+ await page.goto(url.toString());await expect(page.getByRole('heading',{name:'Your real estate workspace'})).toBeVisible();
+}
+
+test('D1 policy, resources, booking requests and identities round-trip through the owner UI',async({page})=>{
+ test.setTimeout(600_000);
+ const data=JSON.parse(python('policy_fixture','plan')) as {prefix:string;email:string;phone:string;lead_id:string;property_id:string;link_id:string;isolated_lead_id:string;tue_start:string;tue_end:string;wed_start:string;wed_end:string;gen_start:string;gen_end:string;was_stopped:boolean;stop_updated_at:string;notice_hours:number;policy_version:number;request_ids:string[];resource_ids:string[];policy_ids:string[];slot_ids:string[];active_link_id:string|null;stop_lifted_at:string|null;reason_policy_check:string;reason_policy_restore:string;reason_stop_on:string;reason_stop_off:string};
+ const errors:string[]=[];page.on('pageerror',err=>errors.push(err.message));
+ const local=(iso:string)=>iso.slice(0,16);
+ try{
+  await signIn(page);
+  await page.goto('/policy');
+  await expect(page.getByLabel('Timezone')).toHaveValue('Asia/Kolkata');
+  const targetNotice=data.notice_hours===20?24:20;
+  await page.getByLabel('Advance notice (hours)').fill(String(targetNotice));
+  await page.getByLabel('Change reason').fill(data.reason_policy_check);
+  await page.getByRole('button',{name:'Save policy',exact:true}).click();
+  await expect(page.getByText(`notice ${targetNotice}h`,{exact:false})).toBeVisible();
+  await page.getByLabel('Advance notice (hours)').fill(String(data.notice_hours));
+  await page.getByLabel('Change reason').fill(data.reason_policy_restore);
+  await page.getByRole('button',{name:'Save policy',exact:true}).click();
+  await expect(page.getByText(`notice ${data.notice_hours}h`,{exact:false})).toBeVisible();
+  const agentName=data.prefix+' agent';
+  const created=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/resources')&&r.request().method()==='POST');
+  await page.getByLabel('New resource name').fill(agentName);
+  await page.getByRole('button',{name:'Create resource',exact:true}).click();
+  data.resource_ids.push((await (await created).json()).record.id as string);
+  await expect(page.locator('li').filter({hasText:agentName})).toBeVisible();
+  await page.locator('li').filter({hasText:agentName}).getByRole('button',{name:'Deactivate'}).click();
+  await page.getByLabel(/Deactivation reason/).fill('Fictional D1 browser churn');
+  await page.getByRole('button',{name:'Confirm deactivation',exact:true}).click();
+  await expect(page.locator('li').filter({hasText:agentName})).toContainText('inactive');
+  await page.getByLabel('First day').fill(data.gen_start);
+  await page.getByLabel('Last day').fill(data.gen_end);
+  // Bulk insert of a full week grid over a remote DB; per-call budget only, no global change.
+  const generated=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/visit-slots/generate')&&r.request().method()==='POST',{timeout:120_000});
+  await page.getByRole('button',{name:'Generate slots',exact:true}).click();
+  data.slot_ids.push(...((await (await generated).json()).record.slot_ids as string[]));
+  await expect(page.getByText(/Created \d+ slots, skipped \d+ overlapping\./)).toBeVisible();
+  const policyMade=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/automation-policies')&&r.request().method()==='POST');
+  await page.getByLabel('Policy kind').selectOption('followup_nudge');
+  await page.getByLabel('Hours before visit').fill('');
+  await page.getByLabel('Days after event').fill('2');
+  await page.getByLabel('After event (for nudges)').fill('no_visit_booked');
+  await page.getByRole('button',{name:'Create policy',exact:true}).click();
+  data.policy_ids.push((await (await policyMade).json()).record.id as string);
+  await expect(page.getByText(/followup_nudge/)).toBeVisible();
+  await page.getByLabel('Destination',{exact:true}).fill(data.phone);
+  await page.getByRole('button',{name:'Add suppression',exact:true}).click();
+  await expect(page.getByText(data.phone)).toBeVisible();
+  await page.getByLabel('Observed link id').fill(data.link_id);
+  await page.getByLabel('Canonical lead id').fill(data.lead_id);
+  await page.getByLabel('Verified destination').fill(data.phone);
+  await page.getByLabel('Verification note').fill('Fictional D1 browser check-in');
+  const linked=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/identity-links/link')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Link identity to lead',exact:true}).click();
+  data.active_link_id=((await (await linked).json()).record.id) as string;
+  const identitySection=page.locator('section').filter({has:page.getByRole('heading',{name:'Channel identities'})});
+  await expect(identitySection.locator('li').getByText('active').first()).toBeVisible();
+  await page.getByLabel('Status filter').selectOption('active');
+  const activeRow=identitySection.locator('li').filter({hasText:data.phone.slice(1)});
+  await expect(activeRow).toHaveCount(1);
+  await activeRow.getByRole('button',{name:'Revoke'}).click();
+  await expect(activeRow).toHaveCount(0);
+  await page.getByLabel('Status filter').selectOption('');
+  await expect(identitySection.locator('li').getByText('revoked').first()).toBeVisible();
+  await page.getByLabel('Stop reason').fill(data.reason_stop_on);
+  await page.getByRole('button',{name:'Stop autonomous commits',exact:true}).click();
+  await expect(page.getByText('STOPPED')).toBeVisible();
+  await page.getByLabel('Stop reason').fill(data.reason_stop_off);
+  const lifted=page.waitForResponse(r=>r.url().endsWith('/api/owner/crm/automation-controls/stop')&&r.request().method()==='POST'&&r.request().postDataJSON()?.stopped===false);
+  await page.getByRole('button',{name:'Lift the stop',exact:true}).click();
+  data.stop_lifted_at=((await (await lifted).json()).record.updated_at) as string;
+  await expect(page.getByText('currently allowed')).toBeVisible();
+  const tueKey='e2e-d1-'+Date.now()+'-tue';
+  const tueProposed=await page.request.post('/api/owner/crm/booking-requests',{headers:{origin},data:{request_key:tueKey,lead_id:data.lead_id,property_id:data.property_id,requested_start:data.tue_start,requested_end:data.tue_end}});
+  expect(tueProposed.ok()).toBe(true);
+  const tueId=((await tueProposed.json()).record.id) as string;data.request_ids.push(tueId);
+  await page.goto('/booking-requests');
+  await expect(page.getByRole('button',{name:/awaiting_owner/})).toBeVisible();
+  await page.getByRole('button',{name:/awaiting_owner/}).click();
+  await expect(page.getByText('Suggested alternatives')).toBeVisible();
+  await page.getByLabel('Approved start (blank keeps request)').fill(local(data.wed_start));
+  await page.getByLabel('Approved end').fill(local(data.wed_end));
+  await page.getByLabel('Decision reason').fill('Fictional D1 browser override');
+  await page.getByRole('button',{name:'Record decision',exact:true}).click();
+  await expect(page.getByText('BOOKING REQUEST · APPROVED')).toBeVisible();
+  await page.getByRole('button',{name:'Commit booking',exact:true}).click();
+  await expect(page.getByText('BOOKING REQUEST · BOOKED')).toBeVisible();
+  const booked=await (await page.request.get('/api/owner/crm/appointments?lead_id='+data.lead_id,{headers:{origin}})).json();
+  expect(booked.total).toBe(1);expect(booked.items[0].status).toBe('confirmed');
+  const wedKey='e2e-d1-'+Date.now()+'-wed';
+  const wedStart=new Date(new Date(data.wed_start).getTime()+3*3600*1000).toISOString();
+  const wedEnd=new Date(new Date(data.wed_end).getTime()+3*3600*1000).toISOString();
+  const wedProposed=await page.request.post('/api/owner/crm/booking-requests',{headers:{origin},data:{request_key:wedKey,lead_id:data.lead_id,property_id:data.property_id,requested_start:wedStart,requested_end:wedEnd}});
+  expect(wedProposed.ok()).toBe(true);
+  data.request_ids.push(((await wedProposed.json()).record.id) as string);
+  await page.goto('/booking-requests');
+  await page.getByLabel('Status filter').selectOption('approved');
+  await expect(page.getByRole('button',{name:/approved/})).toBeVisible();
+  await page.getByRole('button',{name:/approved/}).click();
+  await page.getByRole('button',{name:'Commit booking',exact:true}).click();
+  await expect(page.getByText('BOOKING REQUEST · BOOKED')).toBeVisible();
+  const both=await (await page.request.get('/api/owner/crm/appointments?lead_id='+data.lead_id,{headers:{origin}})).json();
+  expect(both.total).toBe(2);
+  expect(errors).toEqual([]);
+ }finally{
+  try{await page.request.delete('/api/session',{headers:{origin},timeout:10000}).catch(()=>undefined);}finally{python('policy_fixture','cleanup',JSON.stringify(data));}
+ }
+});

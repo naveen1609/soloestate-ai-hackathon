@@ -440,3 +440,15 @@ def test_concurrent_faq_revision_serializes_with_draft_commit(b3c):
     assert outcome.get('published') is True
     assert 'error' not in outcome, outcome.get('error')
     assert outcome['draft']['record']['unsupported_reason'] == 'unauthorized_faq'
+
+def test_message_seq_assigns_gapless_per_conversation(b3c):
+    b = b3c; convo = open_chat(b)
+    first = say(b, convo)
+    reply = run_draft(b, convo, first, StubModel(grounded_text(b)))['record']
+    note = say(b, convo, role='owner', body='Owner note.')
+    seqs = [row[0] for row in b['conn'].execute(
+        'SELECT seq FROM soloestate.conversation_messages WHERE conversation_id=%s ORDER BY seq', (convo['id'],)).fetchall()]
+    assert (first['seq'], reply['seq'], note['seq']) == (1, 2, 3)
+    assert seqs == [1, 2, 3]
+    other = open_chat(b)
+    assert say(b, other)['seq'] == 1

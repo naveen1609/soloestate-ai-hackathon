@@ -63,3 +63,14 @@ it('allows only explicit appointment list queries',async()=>{
  expect((await GET(request('crm/appointments?sql=DROP','GET'),context)).status).toBe(400);
  expect(fetch).toHaveBeenCalledTimes(1);
 });
+it.each([['GET','crm/business-policy'],['PATCH','crm/business-policy'],['GET','crm/resources'],['POST','crm/resources'],['POST','crm/resources/'+ID+'/deactivate'],['POST','crm/visit-slots/generate'],['GET','crm/booking-requests'],['GET','crm/booking-requests/'+ID],['POST','crm/booking-requests'],['POST','crm/booking-requests/'+ID+'/confirm'],['POST','crm/booking-requests/'+ID+'/decide'],['POST','crm/booking-requests/'+ID+'/commit'],['POST','crm/booking-requests/'+ID+'/cancel'],['GET','crm/identity-links'],['POST','crm/identity-links/link'],['POST','crm/identity-links/'+ID+'/revoke'],['GET','crm/suppression-list'],['POST','crm/suppression-list'],['GET','crm/automation-controls'],['POST','crm/automation-controls/stop'],['GET','crm/automation-policies'],['POST','crm/automation-policies'],['PATCH','crm/automation-policies/'+ID]])('permits D1 owner paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(true));
+it.each([['DELETE','crm/resources/'+ID],['PATCH','crm/resources/'+ID],['GET','crm/booking-requests/'+ID+'/commit'],['POST','crm/booking-requests/'+ID],['POST','crm/identity-links/'+ID],['GET','crm/identity-links/'+ID+'/revoke'],['DELETE','crm/suppression-list'],['PATCH','crm/automation-controls/stop'],['POST','crm/automation-policies/'+ID],['GET','crm/automation-policies/'+ID+'/enable'],['POST','crm/visit-slots/'+ID+'/generate']])('rejects unregistered D1 paths %s %s',(method,path)=>expect(permitted(method,path)).toBe(false));
+it('allows only explicit booking-request and identity-link queries',async()=>{
+ const fetch=vi.fn(async()=>Response.json({items:[],total:0}));vi.stubGlobal('fetch',fetch);
+ const requests={params:Promise.resolve({path:['crm','booking-requests']})};const links={params:Promise.resolve({path:['crm','identity-links']})};
+ expect((await GET(request('crm/booking-requests?status=awaiting_owner','GET'),requests)).status).toBe(200);
+ expect((await GET(request('crm/booking-requests?sql=DROP','GET'),requests)).status).toBe(400);
+ expect((await GET(request('crm/identity-links?lead_id='+ID,'GET'),links)).status).toBe(200);
+ expect((await GET(request('crm/identity-links?debug=1','GET'),links)).status).toBe(400);
+ expect(fetch).toHaveBeenCalledTimes(2);
+});

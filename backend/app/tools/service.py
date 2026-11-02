@@ -52,11 +52,11 @@ def get_property_matches(cur, args: s.GetMatchesInput, context):
 
 
 def get_available_slots(cur, args: s.GetSlotsInput, context):
+    from app.policies import availability_windows
     checked_at = cur.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
-    rows = cur.execute("""SELECT s.id,s.starts_at,s.ends_at FROM soloestate.visit_slots s
-        WHERE s.enabled AND s.starts_at >= %s AND s.starts_at >= %s AND s.ends_at <= %s
-        AND NOT EXISTS (SELECT 1 FROM soloestate.bookings b WHERE b.slot_id=s.id AND b.status='confirmed')
-        ORDER BY s.starts_at,s.id LIMIT %s""", (checked_at, args.since, args.until, args.limit + 1)).fetchall()
+    policy = cur.execute("SELECT * FROM soloestate.business_policies WHERE id='default'").fetchone()
+    rows = availability_windows(cur, args.since, args.until, resource_id=args.resource_id, policy=dict(policy),
+                                now=checked_at, limit=args.limit + 1)
     return s.SlotsOutput(slots=rows[:args.limit], truncated=len(rows) > args.limit, checked_at=checked_at)
 
 
@@ -93,10 +93,18 @@ def create_followup_draft(cur, args: s.DraftInput, context):
     return s.DraftOutput(draft=row, created=True)
 
 
-def _booking_snapshot(cur, lead_id, property_id, slot_id):
-    # Lock in the same order for request and commit. Slot lock serializes bookers across runs.
+def _booking_snapshot(cur, lead_id, property_id, slot_id, resource_id=None):
+    from app.policies import OWNER_RESOURCE_ID, conflicts, site_capacity_ok
+    from app.snapshots import build_booking_v1, build_booking_v2
+    # Lock order: approval (held by caller) → resource → slot → property → lead.
+    resolved = resource_id or OWNER_RESOURCE_ID
+    resource = required(cur.execute("SELECT * FROM soloestate.resources WHERE id=%s FOR UPDATE", (resolved,)).fetchone(), "Resource")
+    if not resource["active"]:
+        raise ToolFailure("resource_unavailable", "The assigned resource is not available.")
     slot = required(cur.execute("SELECT * FROM soloestate.visit_slots WHERE id=%s FOR UPDATE", (slot_id,)).fetchone(), "Slot")
-    prop = required(cur.execute("SELECT * FROM soloestate.properties WHERE id=%s FOR SHARE", (property_id,)).fetchone(), "Property")
+    if slot["resource_id"] != resource["id"]:
+        raise ToolFailure("slot_unavailable", "The appointment slot is assigned to a different resource.")
+    prop = required(cur.execute("SELECT * FROM soloestate.properties WHERE id=%s FOR UPDATE", (property_id,)).fetchone(), "Property")
     lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s FOR SHARE", (lead_id,)).fetchone(), "Lead")
     require_contact_action(lead)
     if lead['archived_at'] is not None:
@@ -104,23 +112,37 @@ def _booking_snapshot(cur, lead_id, property_id, slot_id):
     now = cur.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
     if not slot["enabled"] or slot["starts_at"] <= now:
         raise ToolFailure("slot_unavailable", "The appointment slot is disabled or has already started.")
-    if cur.execute("SELECT id FROM soloestate.bookings WHERE slot_id=%s AND status='confirmed'", (slot_id,)).fetchone():
-        raise ToolFailure("slot_unavailable", "The appointment slot has already been booked.")
+    policy = cur.execute("SELECT * FROM soloestate.business_policies WHERE id='default'").fetchone()
+    if conflicts(cur, resource["id"], slot["starts_at"], slot["ends_at"], policy["buffer_minutes"]):
+        raise ToolFailure("slot_unavailable", "The resource is already booked for that window.")
     if not prop["active"]:
         raise ToolFailure("property_unavailable", "The property is no longer active.")
+    if not site_capacity_ok(cur, prop["id"], slot["starts_at"], slot["ends_at"]):
+        raise ToolFailure("site_unavailable", "Site capacity is full for that window.")
     # Only business data relevant to the approved action; no volatile timestamps.
-    return {"lead_id": str(lead_id), "recipient": lead["email"], "property_id": str(property_id),
-            "property_title": prop["title"], "price": str(prop["price"]), "slot_id": str(slot_id),
-            "starts_at": slot["starts_at"].isoformat(), "ends_at": slot["ends_at"].isoformat()}
+    base = dict(lead_id=lead["id"], recipient=lead["email"], property_id=prop["id"], property_title=prop["title"],
+                price=prop["price"], slot_id=slot["id"], starts_at=slot["starts_at"], ends_at=slot["ends_at"])
+    if resource_id is None:
+        return build_booking_v1(**base)
+    return build_booking_v2(resource_id=resource["id"], buffer_min=policy["buffer_minutes"], **base)
+
+
+def _payload_resource(payload):
+    from app.policies import OWNER_RESOURCE_ID
+    from uuid import UUID
+    return UUID(payload["resource_id"]) if payload.get("snapshot_version") == 2 else OWNER_RESOURCE_ID
 
 
 def request_approval(cur, args: s.ApprovalInput, context):
+    from app.policies import OWNER_RESOURCE_ID
+    from app.snapshots import build_followup_v1
     status = _mutable_run(cur, context)
     row = cur.execute("SELECT * FROM soloestate.approvals WHERE run_id=%s AND idempotency_key=%s",
                       (context.run_id, args.idempotency_key)).fetchone()
     if row:
         _same(row["kind"] == args.kind and row["draft_id"] == args.draft_id and
-              (args.kind == "followup" or (row["lead_id"], row["property_id"], row["slot_id"]) == (args.lead_id, args.property_id, args.slot_id)))
+              (args.kind == "followup" or ((row["lead_id"], row["property_id"], row["slot_id"]) == (args.lead_id, args.property_id, args.slot_id)
+               and _payload_resource(row["payload"]) == (args.resource_id or OWNER_RESOURCE_ID))))
         return s.ApprovalOutput(approval=row, created=False)
     _require_open(status)
     if args.kind == "followup":
@@ -131,11 +153,12 @@ def request_approval(cur, args: s.ApprovalInput, context):
         lead = required(cur.execute("SELECT * FROM soloestate.leads WHERE id=%s AND archived_at IS NULL FOR SHARE", (draft["lead_id"],)).fetchone(), "Active lead")
         require_contact_action(lead)
         lead_id = draft["lead_id"]
-        payload = {"draft_id": str(draft["id"]), "lead_id": str(lead_id), "version": draft["version"],
-                   "channel": draft["channel"], "recipient": lead["email"], "subject": draft["subject"], "body": draft["body"]}
+        payload = build_followup_v1(draft_id=draft["id"], lead_id=lead_id, version=draft["version"],
+                                    channel=draft["channel"], recipient=lead["email"],
+                                    subject=draft["subject"], body=draft["body"])
     else:
         lead_id = args.lead_id
-        payload = _booking_snapshot(cur, lead_id, args.property_id, args.slot_id)
+        payload = _booking_snapshot(cur, lead_id, args.property_id, args.slot_id, args.resource_id)
     row = cur.execute("""INSERT INTO soloestate.approvals
         (id,run_id,kind,lead_id,draft_id,property_id,slot_id,idempotency_key,payload)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
@@ -146,6 +169,7 @@ def request_approval(cur, args: s.ApprovalInput, context):
 
 
 def book_site_visit(cur, args: s.BookInput, context):
+    from app.policies import OWNER_RESOURCE_ID
     status = _mutable_run(cur, context)
     previous = cur.execute("SELECT * FROM soloestate.bookings WHERE run_id=%s AND idempotency_key=%s",
                            (context.run_id, args.idempotency_key)).fetchone()
@@ -159,13 +183,16 @@ def book_site_visit(cur, args: s.BookInput, context):
         raise ToolFailure("invalid_approval", "This approval is not for a booking.")
     if approval["status"] != "approved":
         raise ToolFailure("approval_required", "Booking requires an owner-approved request; pending, rejected or consumed approvals cannot be used.")
-    payload = _booking_snapshot(cur, approval["lead_id"], approval["property_id"], approval["slot_id"])
+    resource_id = _payload_resource(approval["payload"])
+    payload = _booking_snapshot(cur, approval["lead_id"], approval["property_id"], approval["slot_id"],
+                                resource_id if approval["payload"].get("snapshot_version") == 2 else None)
     if payload != approval["payload"]:
         raise ToolFailure("stale_approval", "The approved booking details changed; request fresh owner approval.")
     row = cur.execute("""INSERT INTO soloestate.bookings
-        (id,run_id,approval_id,lead_id,property_id,slot_id,idempotency_key,replaces_booking_id)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-        (uuid4(), context.run_id, approval["id"], approval["lead_id"], approval["property_id"], approval["slot_id"], args.idempotency_key, context.replaces_booking_id)).fetchone()
+        (id,run_id,approval_id,lead_id,property_id,slot_id,resource_id,idempotency_key,replaces_booking_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+        (uuid4(), context.run_id, approval["id"], approval["lead_id"], approval["property_id"], approval["slot_id"],
+         resource_id, args.idempotency_key, context.replaces_booking_id)).fetchone()
     cur.execute("UPDATE soloestate.approvals SET status='consumed' WHERE id=%s", (approval["id"],))
     return s.BookingOutput(booking=row, created=True)
 
@@ -193,9 +220,9 @@ class ToolSpec:
 REGISTRY = {
     "get_leads": ToolSpec("Read leads created within a specified half-open date window.", s.GetLeadsInput, s.LeadsOutput, get_leads),
     "get_property_matches": ToolSpec("Read deterministic exact-criteria property matches for one lead.", s.GetMatchesInput, s.MatchesOutput, get_property_matches),
-    "get_available_slots": ToolSpec("Read future enabled slots without confirmed bookings; availability is provisional.", s.GetSlotsInput, s.SlotsOutput, get_available_slots),
+    "get_available_slots": ToolSpec("Read future enabled slots with per-resource availability; availability is provisional.", s.GetSlotsInput, s.SlotsOutput, get_available_slots),
     "create_followup_draft": ToolSpec("Persist an email draft only; does not send a customer message.", s.DraftInput, s.DraftOutput, create_followup_draft),
-    "request_approval": ToolSpec("Persist a pending review snapshot; never approve it. For followup use ONLY kind, draft_id and idempotency_key (omit lead_id/property_id/slot_id). For booking use kind, lead_id, property_id, slot_id and idempotency_key (omit draft_id).", s.ApprovalInput, s.ApprovalOutput, request_approval),
+    "request_approval": ToolSpec("Persist a pending review snapshot; never approve it. For followup use ONLY kind, draft_id and idempotency_key (omit lead_id/property_id/slot_id/resource_id). For booking use kind, lead_id, property_id, slot_id and idempotency_key with optional resource_id (omit draft_id).", s.ApprovalInput, s.ApprovalOutput, request_approval),
     "book_site_visit": ToolSpec("Commit a site visit only from an approved, unchanged request after locking and rechecking availability.", s.BookInput, s.BookingOutput, book_site_visit),
     "get_run_status": ToolSpec("Read persisted run state, recent steps and counts; do not infer completion.", s.RunStatusInput, s.RunStatusOutput, get_run_status),
 }

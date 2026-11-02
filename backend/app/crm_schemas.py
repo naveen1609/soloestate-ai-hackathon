@@ -1,12 +1,14 @@
-from datetime import timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 import re
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 from app.tools.schemas import Input
 from app.qualification import Timeframe
+
+PHONE_PATTERN = r'^\+[1-9][0-9]{7,14}$'
 
 
 class Write(Input):
@@ -73,6 +75,9 @@ class PropertyCreate(Write):
     active: bool = Field(default=True,strict=True)
 
 
+    concurrent_visit_capacity: int | None = Field(default=None, gt=0)
+
+
 class PropertyUpdate(PropertyCreate):
     expected_version: int = Field(gt=0,strict=True)
 
@@ -80,6 +85,7 @@ class PropertyUpdate(PropertyCreate):
 class SlotCreate(Write):
     starts_at: AwareDatetime
     ends_at: AwareDatetime
+    resource_id: UUID | None = None
 
     @model_validator(mode='after')
     def duration(self):
@@ -92,6 +98,7 @@ class AppointmentRequest(Write):
     lead_id: UUID
     property_id: UUID
     slot_id: UUID
+    resource_id: UUID | None = None
     replaces_booking_id: UUID | None = None
     expected_version: int | None = Field(default=None,gt=0,strict=True)
 
@@ -187,3 +194,127 @@ class OutcomeUpdate(Versioned):
     followup_state: Literal['none','pending','done'] | None = None
     followup_note: str | None = Field(default=None,max_length=2000)
     reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class PolicyUpdate(Versioned):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+    timezone: str | None = Field(default=None,min_length=1,max_length=64)
+    working_days: list[int] | None = None
+    weekly_holiday: int | None = Field(default=None,ge=0,le=6,strict=True)
+    hours_start: time | None = None
+    hours_end: time | None = None
+    holiday_dates: list[date] | None = None
+    notice_hours: int | None = Field(default=None,gt=0,strict=True)
+    default_duration_min: int | None = Field(default=None,gt=0,strict=True)
+    min_duration_min: int | None = Field(default=None,gt=0,strict=True)
+    max_duration_min: int | None = Field(default=None,gt=0,strict=True)
+    buffer_minutes: int | None = Field(default=None,ge=0,strict=True)
+
+
+class SlotGeneration(Write):
+    resource_id: UUID | None = None
+    start_date: date
+    end_date: date
+    duration_min: int | None = Field(default=None,gt=0,strict=True)
+
+
+class ResourceCreate(Write):
+    name: str = Field(min_length=1,max_length=200)
+
+
+class ResourceDeactivate(Versioned):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class BookingRequestCreate(Write):
+    lead_id: UUID
+    property_id: UUID | None = None
+    conversation_id: UUID | None = None
+    channel: Literal['owner','synthetic','website','whatsapp'] = 'owner'
+    requested_start: AwareDatetime
+    requested_end: AwareDatetime
+    requested_resource_id: UUID | None = None
+    requested_duration_min: int | None = Field(default=None,gt=0,strict=True)
+
+    @model_validator(mode='after')
+    def window(self):
+        if self.requested_end<=self.requested_start:
+            raise ValueError('Requested window must be positive')
+        return self
+
+
+class BookingConfirm(Versioned):
+    pass
+
+
+class BookingDecide(Versioned):
+    decision: Literal['approved','denied']
+    expected_request_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    approved_start: AwareDatetime | None = None
+    approved_end: AwareDatetime | None = None
+    approved_resource_id: UUID | None = None
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+    @model_validator(mode='after')
+    def window(self):
+        if (self.approved_start is None)!=(self.approved_end is None):
+            raise ValueError('Approved window needs both start and end')
+        if self.approved_start is not None and self.approved_end<=self.approved_start:
+            raise ValueError('Approved window must be positive')
+        return self
+
+
+class BookingCommit(Write):
+    expected_request_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class BookingRequestCancel(Versioned):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class IdentityLinkCreate(Write):
+    link_id: UUID
+    lead_id: UUID
+    verified_destination: str = Field(min_length=1,max_length=254)
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class IdentityRevoke(Versioned):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class SuppressionCreate(Write):
+    channel: Literal['website','whatsapp']
+    destination: str = Field(min_length=1,max_length=254)
+    evidence_ref: str | None = Field(default=None,max_length=1000)
+
+
+class ControlsSet(Write):
+    stopped: bool = Field(strict=True)
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
+class AutomationPolicyCreate(Write):
+    kind: Literal['booking_reminder','followup_nudge']
+    hours_before: int | None = Field(default=None,gt=0,strict=True)
+    days_after: int | None = Field(default=None,ge=0,strict=True)
+    after_event: str | None = Field(default=None,min_length=1,max_length=120)
+    frequency: Literal['once','daily','weekly'] = 'once'
+    categories: list[str] = Field(default_factory=list)
+    lead_statuses: list[str] = Field(default_factory=list)
+    max_attempts: int = Field(default=1,gt=0,strict=True)
+    per_lead_cooldown_hours: int = Field(default=24,ge=0,strict=True)
+    wording: Literal['template','assisted'] = 'template'
+
+
+class AutomationPolicyUpdate(Versioned):
+    hours_before: int | None = Field(default=None,gt=0,strict=True)
+    days_after: int | None = Field(default=None,ge=0,strict=True)
+    after_event: str | None = Field(default=None,min_length=1,max_length=120)
+    frequency: Literal['once','daily','weekly'] | None = None
+    categories: list[str] | None = None
+    lead_statuses: list[str] | None = None
+    max_attempts: int | None = Field(default=None,gt=0,strict=True)
+    per_lead_cooldown_hours: int | None = Field(default=None,ge=0,strict=True)
+    wording: Literal['template','assisted'] | None = None
+    enabled: bool | None = Field(default=None,strict=True)

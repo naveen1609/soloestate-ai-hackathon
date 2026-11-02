@@ -237,3 +237,147 @@ def task_detail(identifier:UUID,crm:CRM=Depends(service)):
 def edit_task(identifier:UUID,body:s.TaskUpdate,crm:CRM=Depends(service)):
     from app.followups import update_task
     return update_task(crm,identifier,body)
+
+
+@router.get('/business-policy')
+def business_policy(crm:CRM=Depends(service)):
+    from app.policies import get_policy
+    return get_policy(crm)
+
+
+@router.patch('/business-policy')
+def edit_policy(body:s.PolicyUpdate,crm:CRM=Depends(service)):
+    from app.policies import update_policy
+    return update_policy(crm,body)
+
+
+@router.get('/resources')
+def resources(crm:CRM=Depends(service)):
+    from app.resources import listing
+    return listing(crm)
+
+
+@router.post('/resources')
+def create_resource(body:s.ResourceCreate,crm:CRM=Depends(service)):
+    from app.resources import create
+    return create(crm,body)
+
+
+@router.post('/resources/{identifier}/deactivate')
+def deactivate_resource(identifier:UUID,body:s.ResourceDeactivate,crm:CRM=Depends(service)):
+    from app.resources import deactivate
+    return deactivate(crm,identifier,body)
+
+
+@router.post('/visit-slots/generate')
+def generate_visit_slots(body:s.SlotGeneration,crm:CRM=Depends(service)):
+    from app.policies import generate_slots
+    return generate_slots(crm,body)
+
+
+@router.get('/booking-requests')
+def booking_requests(lead_id:UUID|None=None,status:Literal['proposed','awaiting_owner','approved','denied','expired','booked','cancelled']|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.booking_requests import listing
+    return listing(crm,lead_id=lead_id,status=status,page=page,page_size=page_size)
+
+
+@router.get('/booking-requests/{identifier}')
+def booking_request_detail(identifier:UUID,crm:CRM=Depends(service)):
+    from app.booking_requests import detail
+    return detail(crm,identifier)
+
+
+@router.post('/booking-requests')
+def create_booking_request(body:s.BookingRequestCreate,crm:CRM=Depends(service)):
+    from app.booking_requests import propose
+    return propose(crm,body)
+
+
+@router.post('/booking-requests/{identifier}/confirm')
+def confirm_booking_request(identifier:UUID,body:s.BookingConfirm,crm:CRM=Depends(service)):
+    from app.booking_requests import confirm
+    result=confirm(crm,identifier,body)
+    if not result.get('confirmed'): raise CRMError(result.get('message') or 'Booking request cannot be confirmed.',409)
+    return result
+
+
+@router.post('/booking-requests/{identifier}/decide')
+def decide_booking_request(identifier:UUID,body:s.BookingDecide,crm:CRM=Depends(service)):
+    from app.booking_requests import decide
+    result=decide(crm,identifier,body)
+    if not result.get('decided'): raise CRMError(result.get('message') or 'Booking request cannot be decided.',409)
+    return result
+
+
+@router.post('/booking-requests/{identifier}/commit')
+def commit_booking_request(identifier:UUID,body:s.BookingCommit,crm:CRM=Depends(service)):
+    from app.booking_requests import commit
+    result=commit(crm,identifier,body)
+    if not result.get('committed'): raise CRMError(result.get('message') or 'Booking request cannot be committed.',409)
+    return result
+
+
+@router.post('/booking-requests/{identifier}/cancel')
+def cancel_booking_request(identifier:UUID,body:s.BookingRequestCancel,crm:CRM=Depends(service)):
+    from app.booking_requests import cancel
+    return cancel(crm,identifier,body)
+
+
+@router.get('/identity-links')
+def identity_links(lead_id:UUID|None=None,status:Literal['observed','active','revoked','superseded']|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.identity_links import listing
+    return listing(crm,lead_id=lead_id,status=status,page=page,page_size=page_size)
+
+
+@router.post('/identity-links/link')
+def link_identity(body:s.IdentityLinkCreate,crm:CRM=Depends(service)):
+    from app.identity_links import link
+    return link(crm,body)
+
+
+@router.post('/identity-links/{identifier}/revoke')
+def revoke_identity(identifier:UUID,body:s.IdentityRevoke,crm:CRM=Depends(service)):
+    from app.identity_links import revoke
+    return revoke(crm,identifier,body)
+
+
+@router.get('/suppression-list')
+def suppression_list(crm:CRM=Depends(service)):
+    from app.identity_links import suppression_listing
+    return suppression_listing(crm)
+
+
+@router.post('/suppression-list')
+def create_suppression(body:s.SuppressionCreate,crm:CRM=Depends(service)):
+    from app.identity_links import suppress
+    return suppress(crm,body)
+
+
+@router.get('/automation-controls')
+def automation_controls(crm:CRM=Depends(service)):
+    from app.policies import get_controls
+    return get_controls(crm)
+
+
+@router.post('/automation-controls/stop')
+def set_automation_stop(body:s.ControlsSet,crm:CRM=Depends(service)):
+    from app.policies import set_stop
+    return set_stop(crm,body)
+
+
+@router.get('/automation-policies')
+def automation_policies(crm:CRM=Depends(service)):
+    from app.policies import list_automation_policies
+    return list_automation_policies(crm)
+
+
+@router.post('/automation-policies')
+def create_automation_policy(body:s.AutomationPolicyCreate,crm:CRM=Depends(service)):
+    from app.policies import create_automation_policy
+    return create_automation_policy(crm,body)
+
+
+@router.patch('/automation-policies/{identifier}')
+def edit_automation_policy(identifier:UUID,body:s.AutomationPolicyUpdate,crm:CRM=Depends(service)):
+    from app.policies import update_automation_policy
+    return update_automation_policy(crm,identifier,body)

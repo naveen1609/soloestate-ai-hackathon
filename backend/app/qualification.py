@@ -48,7 +48,7 @@ def reviewed_fingerprint(lead):
 def activity(cur, before, after, reason, request_key, actor='owner'):
     from psycopg.types.json import Jsonb
     from app.journey import FIELDS
-    if actor not in ('owner', 'visitor'):
+    if actor not in ('owner', 'visitor', 'channel', 'policy'):
         raise ValueError('Invalid actor.')
     def snapshot(lead):
         return {**{field: lead[field] for field in FIELDS}, 'qualification': facts(lead),

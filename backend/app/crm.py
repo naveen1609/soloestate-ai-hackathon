@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 from psycopg import sql
@@ -34,6 +34,11 @@ def found(row):
     return row
 
 
+def scalar(row):
+    """First column of a result row, for tuple and dict cursors alike."""
+    return next(iter(row.values())) if isinstance(row, dict) else row[0]
+
+
 SORTS={
  'leads':{'created_desc':'e.created_at DESC','name_asc':'e.name ASC','name_desc':'e.name DESC','budget_desc':'e.budget_max DESC NULLS LAST'},
  'properties':{'created_desc':'e.created_at DESC','title_asc':'e.title ASC','price_asc':'e.price ASC','price_desc':'e.price DESC'},
@@ -58,21 +63,9 @@ class CRM:
             return found(conn.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',(key,)).fetchone())[0]
 
     def mutate(self,action,request,work,actor='owner'):
-        if actor not in ('owner','visitor'): raise ValueError('Invalid actor.')
-        from app.crm_schemas import LeadCreate, LeadUpdate, TaskUpdate, OutcomeUpdate
-        data=request.model_dump(mode='json')
-        # Omitting a PATCH field preserves it; explicit null clears it. Bind that distinction.
-        legacy_digest=None
-        if isinstance(request,LeadCreate) and 'purchase_timeframe' not in request.model_fields_set:
-            data.pop('purchase_timeframe',None)
-        identity={'action':action,'arguments':data}
-        if isinstance(request,LeadUpdate):
-            if 'purchase_timeframe' not in request.model_fields_set:
-                legacy_digest=payload_hash(identity)
-            identity['provided_fields']=sorted(request.model_fields_set)
-        if isinstance(request,(TaskUpdate,OutcomeUpdate)):
-            identity['provided_fields']=sorted(request.model_fields_set)
-        digest=payload_hash(identity)
+        if actor not in ('owner','visitor','channel','policy'): raise ValueError('Invalid actor.')
+        from app.snapshots import select_identity
+        _, digest, legacy_digest = select_identity(action, request)
         try:
             with self.connect() as conn:
                 conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",('crm:'+request.request_key,))
@@ -83,8 +76,11 @@ class CRM:
                     response=prior[1]
                 else:
                     response=encode(work(conn))
+                    entity=response.get('record',{}).get('id') if isinstance(response.get('record'),dict) else None
+                    try: entity_id=UUID(str(entity))
+                    except (ValueError,AttributeError,TypeError): entity_id=None
                     conn.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) VALUES (%s,%s,%s,%s,%s,%s)",
-                        (request.request_key,action,digest,actor,response['record']['id'],Jsonb(response)))
+                        (request.request_key,action,digest,actor,entity_id,Jsonb(response)))
             # Never acknowledge a mutation before the outer connection commits.
             return response
         except psycopg.IntegrityError:
@@ -164,7 +160,7 @@ class CRM:
 
     def save(self,entity,request,identifier=None,actor='owner',freeze_conversation_id=None):
         columns={'leads':('name','email','preferred_localities','budget_min','budget_max','bedrooms','status','notes','purchase_timeframe'),
-                 'properties':('title','locality','price','bedrooms','description','active')}[entity]
+                 'properties':('title','locality','price','bedrooms','description','active','concurrent_visit_capacity')}[entity]
         def work(conn):
             with conn.cursor(row_factory=dict_row) as cur:
                 if identifier:
@@ -222,9 +218,17 @@ class CRM:
 
     def slot(self,request):
         def work(conn):
+            from app.policies import OWNER_RESOURCE_ID
             with conn.cursor(row_factory=dict_row) as cur:
                 if request.starts_at<=datetime.now(timezone.utc): raise CRMError('Visit slot must start in the future.',422)
-                return {'record':cur.execute('INSERT INTO soloestate.visit_slots(id,starts_at,ends_at) VALUES (%s,%s,%s) RETURNING *',(uuid4(),request.starts_at,request.ends_at)).fetchone()}
+                resource_id = request.resource_id or OWNER_RESOURCE_ID
+                resource = found(cur.execute('SELECT * FROM soloestate.resources WHERE id=%s FOR UPDATE',(resource_id,)).fetchone())
+                if not resource['active']: raise CRMError('Slots require an active resource.',422)
+                overlap = cur.execute("""SELECT 1 FROM soloestate.visit_slots WHERE resource_id=%s
+                    AND tstzrange(starts_at,ends_at) && tstzrange(%s,%s) LIMIT 1""",
+                    (resource_id,request.starts_at,request.ends_at)).fetchone()
+                if overlap: raise CRMError('Overlapping slot for this resource. No new slot confirmed.',409)
+                return {'record':cur.execute('INSERT INTO soloestate.visit_slots(id,starts_at,ends_at,resource_id) VALUES (%s,%s,%s,%s) RETURNING *',(uuid4(),request.starts_at,request.ends_at,resource_id)).fetchone()}
         return self.mutate('slot:create',request,work)
 
     def slots(self,since,until):
@@ -260,7 +264,10 @@ class CRM:
             intent=request.model_dump(mode='json',exclude={'request_key'})
             conn.execute("INSERT INTO soloestate.runs(id,request_key,goal,status,origin,plan) VALUES (%s,%s,'Owner appointment operation','pending','owner',%s)",(run,'owner:'+str(run),Jsonb({'policy':{'mode':'draft_first'},'owner_operation':intent})))
             tool=BusinessTools(lambda:self.nested(conn))
-            result=tool.execute('request_approval',dict(kind='booking',lead_id=str(request.lead_id),property_id=str(request.property_id),slot_id=str(request.slot_id),idempotency_key='owner-request'),ToolContext(run_id=run))
+            approval_args=dict(kind='booking',lead_id=str(request.lead_id),property_id=str(request.property_id),slot_id=str(request.slot_id),idempotency_key='owner-request')
+            if request.resource_id is not None:
+                approval_args['resource_id']=str(request.resource_id)
+            result=tool.execute('request_approval',approval_args,ToolContext(run_id=run))
             if result.status!='approval_required': raise CRMError(result.message or 'Appointment request failed.')
             RunStore(lambda:self.nested(conn)).finish(run,'awaiting_approval','owner_approval_required',[],[],connection=conn)
             return self.request_detail(run,conn)

@@ -215,10 +215,22 @@ def append(crm, identifier, request, actor='owner', rate_limit_per_hour=None, vi
                                      (request.supersedes_message_id, identifier)).fetchone()
                 if target is None:
                     raise CRMError('Superseded message not found in this conversation.', 404)
-            row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,role,body,supersedes_message_id,request_key)
-                VALUES (%s,%s,%s,%s,%s) RETURNING *""",
-                (identifier, request.role, request.body.strip(), request.supersedes_message_id, request.request_key)).fetchone()
-            return {'record': row}
+            seq = cur.execute('SELECT coalesce(max(seq),0)+1 AS next FROM soloestate.conversation_messages WHERE conversation_id=%s',
+                                (identifier,)).fetchone()['next']
+            row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,seq,role,body,supersedes_message_id,request_key)
+                VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+                (identifier, seq, request.role, request.body.strip(), request.supersedes_message_id, request.request_key)).fetchone()
+            result = {'record': row}
+            if actor == 'visitor' and request.role == 'customer':
+                # Server-stamped channel evidence for delivery authorization:
+                # handle pinned to this conversation, live website link id or
+                # null (null matches no link, so unlinked threads fail closed).
+                handle = 'web:' + str(identifier)
+                live = cur.execute("""SELECT id FROM soloestate.identity_links WHERE channel='website'
+                    AND provider_ref=%s AND status IN ('observed','active')""", (handle,)).fetchone()
+                result['inbound_evidence'] = {'channel': 'website', 'provider_ref': handle,
+                                              'link_id': str(live['id']) if live else None}
+            return result
     return crm.mutate(f'conversation:message:{identifier}', request, work, actor)
 
 
@@ -310,9 +322,11 @@ async def draft(crm, identifier, request, model, actor='owner'):
                         after = cur.execute("UPDATE soloestate.conversations SET status='pending_owner' WHERE id=%s RETURNING *",
                                             (identifier,)).fetchone()
                         log_activity(cur, before, after, 'Assistant answer needs owner review', request.request_key, actor)
-                    row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,role,body,grounding,unsupported_reason,
-                        citations,confidence,model_name,response_id,request_key) VALUES (%s,'assistant',%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                        (identifier, body, grounding, reason, Jsonb(citations), confidence,
+                    seq = cur.execute('SELECT coalesce(max(seq),0)+1 AS next FROM soloestate.conversation_messages WHERE conversation_id=%s',
+                                        (identifier,)).fetchone()['next']
+                    row = cur.execute("""INSERT INTO soloestate.conversation_messages(conversation_id,seq,role,body,grounding,unsupported_reason,
+                        citations,confidence,model_name,response_id,request_key) VALUES (%s,%s,'assistant',%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                        (identifier, seq, body, grounding, reason, Jsonb(citations), confidence,
                          result.model if result else None, result.response_id if result else None, request.request_key)).fetchone()
                     return {'record': row, 'conversation': after}
             return crm.mutate(f'conversation:draft:{identifier}', request, work, actor)

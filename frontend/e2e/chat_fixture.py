@@ -14,8 +14,12 @@ def local(value):
 
 def plan():
     prefix = 'BrowserChat-' + uuid4().hex[:8]
+    ist = timezone(timedelta(hours=5, minutes=30))
     with connect(Settings()) as conn:
-        start = conn.execute("SELECT greatest(coalesce(max(ends_at),clock_timestamp()),clock_timestamp())+interval '7 days' FROM soloestate.visit_slots").fetchone()[0]
+        base = conn.execute("SELECT greatest(coalesce(max(ends_at),clock_timestamp()),clock_timestamp())+interval '7 days' FROM soloestate.visit_slots").fetchone()[0].astimezone(ist)
+    if base.weekday() == 1:
+        base += timedelta(days=1)
+    start = base.replace(hour=10, minute=30, second=0, microsecond=0)
     end = start + timedelta(minutes=30)
     print(json.dumps(dict(prefix=prefix, email=prefix.lower() + '@example.invalid',
                           starts=[start.isoformat(), end.isoformat()], start_local=local(start), end_local=local(end),
@@ -31,7 +35,8 @@ def cleanup(payload):
         conn.execute('DELETE FROM soloestate.conversation_messages WHERE id=ANY(%s::uuid[])', (messages,))
         conn.execute('DELETE FROM soloestate.conversations WHERE id=ANY(%s::uuid[])', (convos,))
         conn.execute('DELETE FROM soloestate.lead_activities WHERE lead_id=ANY(%s::uuid[])', (leads,))
-        conn.execute('DELETE FROM soloestate.crm_operations WHERE entity_id=ANY(%s::uuid[])', (leads + convos + messages,))
+        ents = [str(i) for i in leads + convos + messages] + data['slot_ids'] + data['faq_ids'] + data['property_ids']
+        conn.execute('DELETE FROM soloestate.crm_operations WHERE entity_id=ANY(%s::uuid[])', (ents,))
         conn.execute('DELETE FROM soloestate.faq_versions WHERE faq_id=ANY(%s::uuid[])', (data['faq_ids'],))
         conn.execute('DELETE FROM soloestate.faqs WHERE id=ANY(%s::uuid[])', (data['faq_ids'],))
         conn.execute('DELETE FROM soloestate.properties WHERE id=ANY(%s::uuid[])', (data['property_ids'],))

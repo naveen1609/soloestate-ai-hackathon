@@ -89,7 +89,7 @@ def test_booking_uniqueness_and_approval_binding(db):
 
 def test_visitor_actor_migration_applies_on_fresh_database(db):
     versions = [row[0] for row in db.execute('SELECT version FROM soloestate.schema_migrations ORDER BY version').fetchall()]
-    assert len(versions) == 10 and versions[-1] == '0010_visitor_actor.sql'
+    assert len(versions) == 11 and versions[-1] == '0011_policy_resources_identity.sql'
     for table in ('crm_operations', 'lead_activities'):
         definition = db.execute('SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname=%s',
                                 (f'{table}_actor_check',)).fetchone()[0]
@@ -108,8 +108,8 @@ def test_visitor_actor_migration_applies_on_fresh_database(db):
     db.execute('INSERT INTO soloestate.conversations(id,lead_id) VALUES (%s,%s)', (convo, lead))
     db.execute("INSERT INTO soloestate.crm_operations(request_key,action,fingerprint,actor,entity_id,response) "
                "VALUES ('chain-op','probe','probe','visitor',%s,'{}')", (uuid4(),))
-    message = db.execute('INSERT INTO soloestate.conversation_messages(conversation_id,role,body,request_key) '
-                         "VALUES (%s,'customer','Hello','chain-op') RETURNING id", (convo,)).fetchone()[0]
+    message = db.execute('INSERT INTO soloestate.conversation_messages(conversation_id,seq,role,body,request_key) '
+                         "VALUES (%s,1,'customer','Hello','chain-op') RETURNING id", (convo,)).fetchone()[0]
     db.execute("INSERT INTO soloestate.lead_activities(lead_id,actor,reason,before_state,after_state,request_key) "
                "VALUES (%s,'visitor','probe','{}','{}','chain-op')", (lead,))
     joined = db.execute("""SELECT m.id FROM soloestate.conversation_messages m
@@ -135,7 +135,7 @@ def test_visitor_actor_migration_applies_on_fresh_database(db):
 def test_rls_enabled_and_no_public_schema_access(db):
     rows = db.execute("""SELECT c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='soloestate' AND c.relkind='r'""").fetchall()
-    assert len(rows) == 19
+    assert len(rows) == 27
     assert all(row[0] for row in rows)
     public_access = db.execute("""SELECT EXISTS (SELECT 1 FROM pg_namespace n,
         LATERAL aclexplode(n.nspacl) a WHERE n.nspname='soloestate' AND a.grantee=0 AND a.privilege_type='USAGE')""").fetchone()[0]

@@ -1,8 +1,9 @@
 """Owner-managed lead state; never a model tool or delivery permission grant."""
+import re
 from typing import Literal
 from pydantic import Field, model_validator
 from psycopg.rows import dict_row
-from app.crm_schemas import Versioned
+from app.crm_schemas import Versioned, PHONE_PATTERN
 
 STAGES = {
     'new': {'qualifying', 'disqualified', 'closed'},
@@ -12,7 +13,8 @@ STAGES = {
 }
 HANDOFF = {'none': {'requested'}, 'requested': {'in_progress', 'resolved'},
            'in_progress': {'resolved'}, 'resolved': {'requested'}}
-FIELDS = ('journey_stage', 'contact_preference', 'contact_permission', 'handoff_state')
+FIELDS = ('journey_stage', 'contact_preference', 'contact_permission', 'handoff_state',
+          'phone', 'whatsapp_permission')
 
 class JourneyUpdate(Versioned):
     reason: str = Field(min_length=1, max_length=1000, pattern=r'\S')
@@ -20,6 +22,8 @@ class JourneyUpdate(Versioned):
     contact_preference: Literal['unspecified','email','phone','none'] | None = None
     contact_permission: Literal['unknown','opted_in','opted_out'] | None = None
     handoff_state: Literal['none','requested','in_progress','resolved'] | None = None
+    phone: str | None = Field(default=None, max_length=32)
+    whatsapp_permission: Literal['unknown','opted_in','opted_out'] | None = None
 
     @model_validator(mode='after')
     def changes(self):
@@ -37,6 +41,10 @@ def validate_transition(before, changes):
     # Permission is evidence recorded by an owner, not inferred from a stage or preference.
     if before['contact_permission'] == 'opted_out' and changes.get('contact_permission') == 'unknown':
         raise CRMError('Opt-out requires explicit opted-in evidence to lift.')
+    if before.get('whatsapp_permission') == 'opted_out' and changes.get('whatsapp_permission') == 'unknown':
+        raise CRMError('WhatsApp opt-out requires explicit opted-in evidence to lift.')
+    if changes.get('phone') is not None and not re.fullmatch(PHONE_PATTERN, changes['phone']):
+        raise CRMError('Phone must be E.164 format (+ country code, 8-15 digits).', 422)
 
 
 def update(crm, identifier, request):
@@ -57,6 +65,13 @@ def update(crm, identifier, request):
                 changes['qualification_fingerprint'] = reviewed_fingerprint(before)
             assignments = sql.SQL(',').join(sql.SQL('{}=%s').format(sql.Identifier(field)) for field in changes)
             after = cur.execute(sql.SQL('UPDATE soloestate.leads SET {} WHERE id=%s RETURNING *').format(assignments), (*changes.values(), identifier)).fetchone()
+            phone = changes.get('phone', before['phone'])
+            if changes.get('whatsapp_permission') == 'opted_out' and phone:
+                cur.execute("""INSERT INTO soloestate.suppression_list(channel,destination,source,evidence_ref)
+                    VALUES ('whatsapp',%s,'owner_action',%s) ON CONFLICT DO NOTHING""",
+                    (phone, 'lead_journey:' + str(identifier) + ':' + request.request_key))
+            if changes.get('whatsapp_permission') == 'opted_in' and phone:
+                cur.execute('DELETE FROM soloestate.suppression_list WHERE channel=%s AND destination=%s', ('whatsapp', phone))
             from app.qualification import activity
             activity(cur,before,after,request.reason.strip(),request.request_key)
             return {'record': after}

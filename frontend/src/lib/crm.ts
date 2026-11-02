@@ -31,7 +31,7 @@ function saved(scope:string):Intent|null {
   } catch {return null;}
 }
 // Persist the exact action before sending, so a lost response/reload cannot cause a new duplicate write.
-export function useMutation(scope:string) {
+export function useMutation(scope:string,schema:z.ZodTypeAny=DetailSchema) {
   const [intent,setIntent]=useState<Intent|null>(()=>typeof window==='undefined'?null:saved(scope));
   const ref=useRef(intent);const gate=useRef(false);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');
@@ -50,7 +50,7 @@ export function useMutation(scope:string) {
         try {result=await crmApi('operations/'+encodeURIComponent(String(action.body.request_key)));}
         catch {throw err;}
       }
-      const record=DetailSchema.parse(result).record;
+      const record=(schema.parse(result) as {record:Row}).record;
       clear();return record;
     } catch(err){setError(message(err));return null;}
     finally{gate.current=false;setBusy(false);}
