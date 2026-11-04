@@ -1,14 +1,35 @@
 # SoloEstate AI
 
-An owner-directed AI Business Operating System for a one-person real estate company. Give it a business goal; Meta Muse Spark proposes a structured plan, chooses permitted tools, observes real results, adapts to failures and stops for owner approval.
+SoloEstate AI is an AI operating system for independent real estate agents and small property businesses. It connects buyer enquiries, listings, site visits, follow-ups and marketing in one workspace. An owner can give Muse Spark a goal in plain language, inspect the actual records and tool results, and review consequential actions before they proceed.
 
-**Phase A Core CRM implemented; phases 1–10 preserved.** The local hackathon application has a responsive dashboard, real Meta integration, persistent Supabase records, approval gates, booking integrity, bounded recovery and automated regression coverage. This is a single-owner demonstration; see [limitations](docs/limitations.md).
+Built for the Meta Global AI Developer Hackathon, **Indie Developer** track and **Build for Your World** theme. The demo follows one fictional Whitefield listing through an owner-approved appointment, an exported marketing kit, and a live read-only Muse Spark run that finds another matching buyer.
+
+[Watch the 2:13 demo on YouTube](https://youtu.be/YJYJiJZyhCo) · [View the hackathon showcase on X](https://x.com/TheAISuperPower/status/2118115987442831615)
 
 Coding-agent entry point: read [AGENTS.md](AGENTS.md), [project state](docs/PROJECT_STATE.md) and [current handoff](docs/HANDOFF.md) before editing. They identify the canonical reference documents, preservation requirements, actual verification evidence and next proposed increment.
 
-## Core CRM update
+## What you can try
 
-The overview now shows live business records. Leads, properties and appointments have owner-managed CRM workspaces; the Muse Spark goal dashboard remains at `/agent`. See [Phase A setup and owner walkthrough](docs/phase-a.md), [verification evidence](docs/phase-a-verification.md), and the separate [Phase B proposal](docs/phase-b-plan.md). Restart existing servers after updating.
+| Route | Workflow |
+| --- | --- |
+| `/chat` | Capture a buyer's requirements, find catalog matches and review visit availability. |
+| `/booking-requests` and `/appointments` | Review a visit request and inspect the persisted booking outcome. |
+| `/agent` | Run a natural-language goal with Muse Spark and inspect the validated plan, tool results and any follow-up draft awaiting review. |
+| `/growth-engine` | Turn a campaign brief and property facts into draft creatives, captions and a suggested campaign plan for review and export. |
+
+The application is a single-owner prototype. The D2 acceptance covers local fictional-data demos with mocked WhatsApp delivery. Growth Engine-lite prepares marketing materials for review and export. External campaign launch is disabled. The recorded Growth segment shows the voice transcript, labelled creative, grounded copy and export. See [Growth setup and verification](README-GROWTH-ENGINE.md) and [D2 acceptance](docs/phase-d2-verification.md#independent-d2-acceptance--4-november-2026).
+
+## Branch workflow
+
+- `hackathon-submission` is the stable branch for judges and the verified demo. The filmed application baseline is `8f0e479`.
+- `dev` is for local development and validation. Review the changes, verify the affected flows, then merge the tested changes into `hackathon-submission` when ready.
+- For judging, select `hackathon-submission` or clone with `git clone --branch hackathon-submission https://github.com/naveen1609/soloestate-ai-hackathon.git`.
+
+## Product potential and roadmap
+
+A solo operator often has to answer enquiries during showings, reconstruct buyer preferences across conversations and prepare marketing for each listing. SoloEstate's opportunity is to carry those details forward as shared business records. The owner can spend more of the day on viewings, negotiations and closing, with routine work ready to review in one place. A pilot could measure response time, missed follow-ups and the share of qualified enquiries that result in a visit.
+
+The next milestone is durable, policy-controlled reminders and follow-ups. The longer-term plan adds a fuller sales CRM, specialized assistants, calendar and CRM integrations, multilingual marketing, reporting and separate workspaces for small teams. The backend will continue to own consent, policy enforcement and business writes. See the [product roadmap](docs/ROADMAP.md#product-direction-after-the-hackathon) for the sequence and scope.
 
 ## Run locally
 
@@ -16,10 +37,10 @@ Requirements: Python 3.12, Node.js 24/npm, a Meta API key with an allowed model 
 
 ### 1. Backend setup
 
-From PowerShell:
+Open PowerShell at the repository root.
 
 ```powershell
-Set-Location 'D:\programing_tools\Meta Global AI Developer Hackathon\soloestate-ai-hackathon\backend'
+Set-Location .\backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -36,6 +57,7 @@ Configure `backend/.env` locally. Existing installations should keep their curre
 | DATABASE_SSLROOTCERT | Absolute path to the Supabase CA certificate |
 | MIGRATION_DATABASE_URL | Optional setup/admin URI; otherwise DATABASE_URL is used |
 | OWNER_API_TOKEN | Generated privately by the owner init command below |
+| VISITOR_TOKEN_SECRET | Locally generated secret for website chat. Use `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
 
 Use the direct connection or session pooler appropriate for your network. See [database setup](docs/database.md) for URI/TLS guidance. Never put secrets in frontend files or NEXT_PUBLIC_ variables. Supabase anon/service-role API keys are not used by this implementation.
 
@@ -50,7 +72,9 @@ Run each command separately and stop on a nonzero exit code:
 .\.venv\Scripts\python.exe -m scripts.demo_preflight
 ```
 
-Expected: status ok, seven migrations, four seeded leads, three properties and six slots. Seeding is repeatable and preserves edits; it does not reset business runs or approvals. Preflight performs real read-only database/tool checks and validates credential presence. It makes **no model call** and does not claim model connectivity. Slots can become unavailable or age out; actual availability is always provisional.
+The seed adds four fictional leads, three properties and six slots to an empty database. Seeding is repeatable and preserves existing edits, runs and approvals. Preflight performs read-only database and tool checks and validates credential presence. Run a fresh goal in `/agent` to verify model connectivity. Slots can become unavailable or age out.
+
+For `/growth-engine`, run `.\.venv\Scripts\python.exe -m scripts.growth_database migrate` from `backend` after core setup. See [Growth Engine-lite setup](README-GROWTH-ENGINE.md) for details.
 
 Start the API and keep this terminal open:
 
@@ -62,10 +86,10 @@ Expected: application startup complete, listening on http://127.0.0.1:8000.
 
 ### 2. Frontend setup
 
-In another PowerShell terminal:
+Open another PowerShell terminal at the repository root.
 
 ```powershell
-Set-Location 'D:\programing_tools\Meta Global AI Developer Hackathon\soloestate-ai-hackathon\frontend'
+Set-Location .\frontend
 npm ci
 if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 npm run build
@@ -85,7 +109,7 @@ In a third terminal, from backend:
 
 Expected: preflight status ok, then a private URL. Open it within two minutes; it is single-use. The dashboard uses an eight-hour opaque HttpOnly owner session. Sign out from the top bar. Never share the login URL or cookie. Health endpoints establish liveness only.
 
-Follow the [five-minute demo runbook](docs/demo.md) for a real read-only goal, a draft-first approval stop, recovery evidence and a repeatable replay. Model requests consume credits. The fixed fictional demo week is **2–8 November 2026**, Bengaluru, INR, Asia/Kolkata display time; it is not interpreted as the current week. No customer-message delivery integration exists, so approved messages remain drafts.
+Follow the [local demo runbook](docs/demo.md) for a read-only goal, a draft-first approval stop and a repeatable replay. Model requests consume credits. The seeded demo week is **2–8 November 2026**, with Bengaluru listings, INR prices and Asia/Kolkata times. Use future slots if that week has passed. Owner-agent follow-ups stay as drafts, and the D2 demonstration uses mocked WhatsApp transport.
 
 Stop servers with Ctrl+C. Nothing starts automatically on reboot.
 

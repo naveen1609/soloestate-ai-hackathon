@@ -1,5 +1,20 @@
 # Product roadmap
 
+## Product direction after the hackathon
+
+SoloEstate AI aims to give one agent or a small property team a single place to manage the path from enquiry to sale. The internal CRM is the system of record. Integrations let owners keep the calendars, communication channels and CRM tools they already use. The following phases describe planned work.
+
+| Sequence | Planned scope |
+| --- | --- |
+| **1. Finish reliable scheduled work** | Verify D3 reminders and follow-ups end to end, including consent rechecks, retry limits, receipts and recovery. Test the integrated release before enabling real delivery. |
+| **2. Deepen the real estate CRM** | Lead deduplication, attribution, assignment and import/export. Extend the sales pipeline through negotiation and won/lost outcomes. Connect calendar availability, rescheduling and reminders. |
+| **3. Add specialist workflows** | Coordinate lead, property, communication, appointment, follow-up and reporting assistants under an owner-directed supervisor. Apply explicit permissions to each tool and retain the results for review. |
+| **4. Connect existing tools** | Verify live WhatsApp delivery and expand to email, SMS and social enquiry capture where appropriate. Consider Google and Outlook calendars, HubSpot, Salesforce and Zoho CRM. Keep n8n available for integrations while native workflows mature. |
+| **5. Expand Growth Engine** | Brand templates, bilingual Tamil and English campaigns, content calendars, listing videos and campaign analytics. Add explicit review controls for any future publishing or ad spend. |
+| **6. Improve owner insight and team readiness** | Reporting on enquiry sources, follow-up gaps, visits and conversion. Add voice instructions and document intake, then build tenant isolation, roles, monitoring, backups and onboarding before commercial rollout. |
+
+Measure progress with recorded outcomes such as time to first response, follow-up completion, qualified enquiries and confirmed visits. These are proposed pilot measures.
+
 **D2 status, 4 November 2026. CONDITIONAL PASS for local fictional-data demos with mocked WhatsApp delivery.** See [independent acceptance and limitations](phase-d2-verification.md#independent-d2-acceptance--4-november-2026). Earlier pending-review entries are historical. D2 is included in the owner-authorized local checkpoint containing this record. Resolve its hash through Git. D3 requires separate authorization.
 
 
