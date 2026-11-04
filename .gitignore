@@ -39,3 +39,10 @@ Thumbs.db
 frontend/test-results/
 frontend/playwright-report/
 frontend/artifacts/
+
+# Local submission footage, exports and scratch notes
+/SoloEstate-demo-footage/
+/submission-preparation/
+/demo-audio/
+/SoloEstate-AI-Hackathon-Demo*.mp4
+/docs/local/
