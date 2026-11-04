@@ -15,6 +15,8 @@ Last updated: **1 November 2026**, Asia/Kolkata. Read [PROJECT_STATE.md](PROJECT
 
 ## Edit ownership and authorization
 
+- **Codex submission ignore session, 5 November 2026: editor claim released.** Added scoped ignore rules on `dev` for local footage, export folders, demo MP4s and `docs/local/`. Existing tracked documentation remains available for judge setup. The owner's pre-existing `backend/.env.example` change was preserved. Ignore and whitespace checks were run. The changes remain in the working tree for review.
+
 - **Codex demo links session, 5 November 2026: editor claim released.** Added the owner-provided YouTube and X links to the README on `dev` at `cbe0140`. The documentation is in the working tree, pending promotion to `hackathon-submission`. Check signed-out link access before submitting.
 
 - **Codex submission README session, 5 November 2026: editor claim released.** Updated the README and roadmap on `dev` at `cbe0140` with the filmed `8f0e479` baseline, judge setup, product direction and owner-selected `dev` → `hackathon-submission` workflow. Documentation remains in the working tree. The submission branch was at `8f0e479` at inspection. Next, review the docs, confirm the final video link and promote the reviewed documentation to the submission branch. No application behavior or verification status changed.
