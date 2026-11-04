@@ -30,6 +30,57 @@ def validate_categories(categories):
         raise CRMError('Unknown message categories: ' + ', '.join(sorted(unknown)) + '.', 422)
 
 
+REPLY_POLICY_CHANNEL = 'whatsapp'
+
+
+def validate_routine_categories(categories):
+    """Immediate replies permit code-allowlisted routine categories only."""
+    from app.crm import CRMError
+    unknown = [c for c in categories if c not in MESSAGE_CATEGORIES]
+    if unknown:
+        raise CRMError('Unknown message categories: ' + ', '.join(sorted(unknown)) + '.', 422)
+    sensitive = [c for c in categories if c in SENSITIVE_CATEGORIES]
+    if sensitive:
+        raise CRMError('Sensitive categories cannot be enabled for automatic replies: ' +
+                       ', '.join(sorted(sensitive)) + '.', 422)
+
+
+def get_reply_policy(crm):
+    from app.crm import encode, found
+    from psycopg.rows import dict_row
+    with crm.connect() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = found(cur.execute('SELECT * FROM soloestate.immediate_reply_policies WHERE id=%s',
+                                    (REPLY_POLICY_CHANNEL,)).fetchone())
+    return encode({'record': dict(row)})
+
+
+def update_reply_policy(crm, request):
+    from app.crm import CRMError, encode, found
+    from psycopg.rows import dict_row
+    def work(conn):
+        with conn.cursor(row_factory=dict_row) as cur:
+            before = found(cur.execute('SELECT * FROM soloestate.immediate_reply_policies WHERE id=%s FOR UPDATE',
+                                       (REPLY_POLICY_CHANNEL,)).fetchone())
+            if before['version'] != request.expected_version:
+                raise CRMError('Policy changed. Reload before editing.')
+            provided = request.model_fields_set
+            changes = {field: getattr(request, field) for field in ('enabled', 'categories')
+                       if field in provided and getattr(request, field) is not None}
+            if not changes:
+                raise CRMError('No policy change requested.')
+            if 'categories' in changes:
+                validate_routine_categories(changes['categories'])
+            merged = dict(before, **changes)
+            if merged['enabled'] and not merged['categories']:
+                raise CRMError('Enabling immediate replies requires at least one routine category.', 422)
+            row = cur.execute('UPDATE soloestate.immediate_reply_policies SET enabled=%s, categories=%s, version=version+1, '
+                              "updated_at=clock_timestamp() WHERE id=%s RETURNING *",
+                              (merged['enabled'], merged['categories'], REPLY_POLICY_CHANNEL)).fetchone()
+            return {'record': encode(row), 'before': encode(before), 'reason': request.reason.strip()}
+    return crm.mutate('reply-policy:update', request, work)
+
+
 def evaluate_window(policy, start, end, now, duration_min=None):
     """Pure policy evaluation of one requested window. Instants in, verdict out.
 

@@ -6,6 +6,7 @@ import Policy from './policy';
 const RID='80000000-0000-4000-8000-000000000001';
 const policy={id:'default',timezone:'Asia/Kolkata',working_days:[0,1,3,4,5,6],weekly_holiday:2,hours_start:'10:00:00',hours_end:'17:00:00',holiday_dates:[],notice_hours:16,default_duration_min:30,min_duration_min:15,max_duration_min:120,buffer_minutes:0,version:3};
 const resource={id:RID,name:'Owner',kind:'person',active:true,version:1};
+const replyPolicy:{id:string;enabled:boolean;categories:string[];version:number}={id:'whatsapp',enabled:false,categories:[],version:1};
 beforeEach(()=>{sessionStorage.clear();vi.unstubAllGlobals();});
 function stub(handler:(url:string,init?:RequestInit)=>unknown){
  return vi.fn(async(input:unknown,init?:RequestInit)=>{const url=String(input);if(url==='/api/session')return Response.json({authenticated:true});return Response.json(handler(url,init));});
@@ -18,6 +19,7 @@ function base(handler:(url:string,init?:RequestInit)=>unknown){
   if(url.includes('/api/owner/crm/automation-policies'))return {items:[],total:0,page:1,page_size:20};
   if(url.includes('/api/owner/crm/suppression-list'))return {items:[],total:0,page:1,page_size:20};
   if(url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return handler(url,init);});
 }
 
@@ -53,6 +55,7 @@ it('creates and deactivates resources',async()=>{
   if(url.includes('/deactivate')&&init?.method==='POST')return {record:{...agent,active:false}};
   if(url.includes('/api/owner/crm/automation-controls'))return {record:{id:'default',emergency_stop:false}};
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return {};});
  vi.stubGlobal('fetch',fetch);
  render(<Policy/>);
@@ -79,6 +82,7 @@ it('generates slots and reports counts',async()=>{
   if(url.includes('/visit-slots/generate'))return {record:{id:RID,created:14,skipped_overlapping:2}};
   if(url.includes('/api/owner/crm/automation-controls'))return {record:{id:'default',emergency_stop:false}};
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return {};});
  vi.stubGlobal('fetch',fetch);
  render(<Policy/>);
@@ -97,6 +101,7 @@ it('stops and lifts autonomous commits with a reason',async()=>{
   if(url.includes('/automation-controls/stop')&&init?.method==='POST'){stopped=JSON.parse(init.body as string).stopped;return {record:{id:'default',emergency_stop:stopped}};}
   if(url.includes('/api/owner/crm/automation-controls'))return {record:{id:'default',emergency_stop:stopped}};
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return {};});
  vi.stubGlobal('fetch',fetch);
  render(<Policy/>);
@@ -122,6 +127,7 @@ it('creates an automation policy and adds a suppression',async()=>{
   if(url.includes('/api/owner/crm/automation-policies'))return {items:[],total:0,page:1,page_size:20};
   if(url.includes('/api/owner/crm/suppression-list'))return {items:[],total:0,page:1,page_size:20};
   if(url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return {};});
  vi.stubGlobal('fetch',fetch);
  render(<Policy/>);
@@ -152,6 +158,7 @@ it('links an identity and revokes an active link',async()=>{
   if(url.includes('/revoke')&&init?.method==='POST'){links=[];return {record:{...active,status:'revoked'}};}
   if(url.includes('/api/owner/crm/automation-controls'))return {record:{id:'default',emergency_stop:false}};
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:replyPolicy};
   return {};});
  vi.stubGlobal('fetch',fetch);
  render(<Policy/>);
@@ -183,6 +190,7 @@ it('discards a stale identity reload that resolves after a newer filter load',as
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list'))return Response.json({items:[],total:0,page:1,page_size:20});
   if(url.includes('/revoke')&&init?.method==='POST')return Response.json({record:revoked});
   if(url.includes('/api/owner/crm/identity-links')&&!init?.method){calls.push(url);return new Promise<Response>(resolve=>waiters.push(v=>resolve(Response.json(v))));}
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return Response.json({record:replyPolicy});
   return Response.json({});}));
  render(<Policy/>);
  const section=(await screen.findByRole('heading',{name:'Channel identities'})).closest('section')!;
@@ -220,9 +228,55 @@ it('keeps failed policy saves visible without claiming success',async()=>{
   if(url.includes('/api/owner/crm/resources'))return Response.json({items:[resource],total:1,page:1,page_size:20});
   if(url.includes('/api/owner/crm/automation-controls'))return Response.json({record:{id:'default',emergency_stop:false}});
   if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return Response.json({items:[],total:0,page:1,page_size:20});
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return Response.json({record:replyPolicy});
   return Response.json({});}));
  render(<Policy/>);
  await user.type(await screen.findByLabelText('Change reason'),'Fictional stale');
  await user.click(screen.getByRole('button',{name:'Save policy'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('Reload before editing');
+});
+
+it('saves immediate-reply policy with reason and pending key',async()=>{
+ const user=userEvent.setup();
+ let body:Record<string,unknown>|null=null;let current=replyPolicy;
+ const fetch=stub((url,init)=>{
+  if(url.includes('/api/owner/crm/business-policy'))return {record:policy};
+  if(url.includes('/api/owner/crm/resources'))return {items:[resource],total:1,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/automation-controls'))return {record:{id:'default',emergency_stop:false}};
+  if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return {items:[],total:0,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/immediate-reply-policy')&&init?.method==='PATCH'){body=JSON.parse(String(init.body));current={...replyPolicy,version:2,enabled:true,categories:['welcome']};return {record:current};}
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return {record:current};
+  return {};});
+ vi.stubGlobal('fetch',fetch);
+ render(<Policy/>);
+ const form=(await screen.findByRole('heading',{name:'Immediate replies'})).closest('form')!;
+ await user.click(within(form).getByLabelText('Enable automatic replies'));
+ await user.click(within(form).getByLabelText('welcome'));
+ await user.type(within(form).getByLabelText('Reply change reason'),'Fictional enable replies');
+ await user.click(within(form).getByRole('button',{name:'Save reply policy'}));
+ await waitFor(()=>expect(body).not.toBeNull());
+ const seen=body as unknown as Record<string,unknown>;
+ expect(seen).toMatchObject({expected_version:1,enabled:true,categories:['welcome'],reason:'Fictional enable replies'});
+ expect(typeof seen.request_key).toBe('string');
+ expect(String(seen.request_key).length).toBeGreaterThan(0);
+ expect(await screen.findByText(/Reply policy v2/)).toBeInTheDocument();
+});
+
+it('shows immediate-reply stale-update errors',async()=>{
+ const user=userEvent.setup();
+ vi.stubGlobal('fetch',vi.fn(async(input:unknown,init?:RequestInit)=>{
+  const url=String(input);
+  if(url==='/api/session')return Response.json({authenticated:true});
+  if(url.includes('/api/owner/crm/business-policy'))return Response.json({record:policy});
+  if(url.includes('/api/owner/crm/resources'))return Response.json({items:[resource],total:1,page:1,page_size:20});
+  if(url.includes('/api/owner/crm/automation-controls'))return Response.json({record:{id:'default',emergency_stop:false}});
+  if(url.includes('/api/owner/crm/automation-policies')||url.includes('/api/owner/crm/suppression-list')||url.includes('/api/owner/crm/identity-links'))return Response.json({items:[],total:0,page:1,page_size:20});
+  if(url.includes('/api/owner/crm/immediate-reply-policy')&&init?.method==='PATCH')return Response.json({message:'Reply policy changed. Reload before editing.'},{status:409});
+  if(url.includes('/api/owner/crm/immediate-reply-policy'))return Response.json({record:replyPolicy});
+  return Response.json({});}));
+ render(<Policy/>);
+ const form=(await screen.findByRole('heading',{name:'Immediate replies'})).closest('form')!;
+ await user.type(within(form).getByLabelText('Reply change reason'),'Fictional stale replies');
+ await user.click(within(form).getByRole('button',{name:'Save reply policy'}));
+ expect(await within(form).findByRole('alert')).toHaveTextContent('Reload before editing');
 });

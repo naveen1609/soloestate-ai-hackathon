@@ -11,6 +11,15 @@ async function signIn(page:Page){
  const url=new URL(value.url),target=new URL(origin);url.host=target.host;url.protocol=target.protocol;
  await page.goto(url.toString());await expect(page.getByRole('heading',{name:'Your real estate workspace'})).toBeVisible();
 }
+async function sendChat(page:Page,text:string){
+ await page.getByLabel('Message',{exact:true}).fill(text);
+ await page.getByRole('button',{name:'Send',exact:true}).click();
+ for(let attempt=0;attempt<3;attempt++){
+  try{await expect(page.getByText(text,{exact:false})).toBeVisible({timeout:120_000});return;}
+  catch(_){const retry=page.getByRole('button',{name:'Retry saved message',exact:true});if(await retry.count()){await retry.click();continue;}throw _;}
+ }
+ throw new Error('chat send did not settle after designed retries');
+}
 
 test('visitor website chat captures a lead, answers grounded questions and requests owner follow-up',async({page})=>{
  test.setTimeout(600_000);
@@ -30,13 +39,12 @@ test('visitor website chat captures a lead, answers grounded questions and reque
   await page.getByRole('button',{name:'Show matching properties',exact:true}).click();await expect(page.locator('li',{hasText:'score'}).first()).toBeVisible();
   const pfaq=await page.request.post('/api/owner/crm/faqs',{headers:{origin},data:{request_key:data.prefix+'-pfaq',scope:'property',property_id:data.property_ids[0],question:'What are the parking terms for '+data.prefix+'?',answer:'Parking is included for '+data.prefix+' homes.'}});expect(pfaq.ok()).toBe(true);data.faq_ids.push((await pfaq.json()).record.id);
   await page.getByRole('button',{name:'Ask about this property',exact:true}).click();await expect(page.getByText(/Focus: [0-9a-f]{8}/)).toBeVisible();
-  await page.getByLabel('Message',{exact:true}).fill('What are the parking terms for '+data.prefix+'?');await page.getByRole('button',{name:'Send',exact:true}).click();
-  await expect(page.getByText(/Parking is included|No verified answer is available/).first()).toBeVisible({timeout:120_000});
+  await sendChat(page,'What are the parking terms for '+data.prefix+'?');
+  await expect(page.getByText(/Parking is included|No verified answer is available/).first()).toBeVisible();
   if(await page.getByText('Status: pending_owner',{exact:false}).count()){const lookup=(await (await page.request.get('/api/owner/crm/leads?q='+encodeURIComponent(data.prefix))).json()).items[0].id as string;const thread=await (await page.request.get('/api/owner/crm/conversations?lead_id='+lookup)).json();const ack=await page.request.post('/api/owner/crm/conversations/'+thread.items[0].id+'/review',{headers:{origin},data:{request_key:data.prefix+'-ack',expected_version:thread.items[0].version,action:'acknowledge',reason:'Fictional e2e reopen'}});expect(ack.ok()).toBe(true);await page.getByRole('button',{name:'Refresh',exact:true}).click();await expect(page.getByText('Status: open',{exact:false})).toBeVisible();}
   await page.getByLabel('From',{exact:true}).fill(data.start_local);await page.getByLabel('Until',{exact:true}).fill(data.end_local);await page.getByRole('button',{name:'Show availability',exact:true}).click();await expect(page.getByText('Provisional only')).toBeVisible();
-  await page.getByLabel('Message',{exact:true}).fill('I would like to visit. Is there a buyer fee on '+data.prefix+' listings?');await page.getByRole('button',{name:'Send',exact:true}).click();
-  await expect(page.getByText(/FAQ v\d|No verified answer is available/).first()).toBeVisible({timeout:120_000});
-  await expect(page.getByText('I would like to visit.',{exact:false})).toBeVisible();
+  await sendChat(page,'I would like to visit. Is there a buyer fee on '+data.prefix+' listings?');
+  await expect(page.getByText(/FAQ v\d|No verified answer is available/).first()).toBeVisible();
   await page.getByLabel('Handoff reason',{exact:true}).fill('Fictional chat follow-up');await page.getByRole('button',{name:'Request owner review',exact:true}).click();await expect(page.getByText('Follow-up: requested',{exact:false})).toBeVisible();
   const leadId=(await (await page.request.get('/api/owner/crm/leads?q='+encodeURIComponent(data.prefix))).json()).items[0].id as string;
   await page.goto('/leads/'+leadId);await page.getByRole('button',{name:/· requested ·/}).click();await expect(page.getByText('I would like to visit.',{exact:false})).toBeVisible();

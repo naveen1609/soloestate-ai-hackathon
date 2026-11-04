@@ -307,6 +307,12 @@ class AutomationPolicyCreate(Write):
     wording: Literal['template','assisted'] = 'template'
 
 
+class ReplyPolicyUpdate(Versioned):
+    enabled: bool | None = Field(default=None,strict=True)
+    categories: list[str] | None = None
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+
+
 class AutomationPolicyUpdate(Versioned):
     hours_before: int | None = Field(default=None,gt=0,strict=True)
     days_after: int | None = Field(default=None,ge=0,strict=True)
@@ -318,3 +324,13 @@ class AutomationPolicyUpdate(Versioned):
     per_lead_cooldown_hours: int | None = Field(default=None,ge=0,strict=True)
     wording: Literal['template','assisted'] | None = None
     enabled: bool | None = Field(default=None,strict=True)
+
+
+class OutboxResolve(Write):
+    action: Literal['mark_resolved_sent','authorize_resend','abandon']
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")
+    evidence: str = Field(default='',max_length=2000)
+
+
+class OutboxRequeue(Write):
+    reason: str = Field(min_length=1,max_length=1000,pattern=r"\S")

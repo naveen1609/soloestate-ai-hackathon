@@ -112,7 +112,7 @@ def gate(record):
 
 def log_activity(cur, before, after, reason, request_key, actor='owner'):
     from psycopg.types.json import Jsonb
-    if actor not in ('owner', 'visitor'):
+    if actor not in ('owner', 'visitor', 'channel'):
         raise ValueError('Invalid actor.')
     snap = lambda row: None if row is None else {'conversation': {'id': str(row['id']), 'status': row['status'],
                                                                  'handoff_state': row['handoff_state']}}

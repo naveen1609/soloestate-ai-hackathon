@@ -1,5 +1,12 @@
-"""Phase C real PostgreSQL website-chat checks; fictional rollback records, except concurrency fixtures committed on separate connections with exact-ID cleanup."""
+"""Phase C real PostgreSQL website-chat checks; fictional rollback records, except concurrency fixtures committed on separate connections with exact-ID cleanup.
+
+Website sends run the shared receptionist turn engine inline (D2 website
+adapter): model stubs speak TurnOutput and assertions target engine
+artifacts, while every channel-mechanics assertion (isolation, freeze,
+rate limits, idempotency, versions, disclosure, provenance) is preserved.
+"""
 import asyncio
+import json
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -11,6 +18,8 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from app import chat_schemas as s
+from app import respond
+from app.catalog import CATALOG_VERSION, FALLBACK_TEXT
 from app.chat import matches as chat_matches
 from app.chat import request_handoff, requirements, resume, scope, send, set_context, slots as chat_slots, start
 from app.chat_api import chat_settings
@@ -24,7 +33,7 @@ from app.crm_api import service
 from app.crm_schemas import DraftRequest, FaqCreate, HandoffUpdate, LeadCreate, MessageAppend, PropertyCreate, ReviewUpdate, SlotCreate
 from pydantic import ValidationError
 from app.chat import RATE_LIMIT_PER_HOUR
-from app.conversation import FIXED_UNSUPPORTED_BODY, append
+from app.conversation import append
 from app.faq import create as faq_create
 from app.main import create_app
 from app.services.meta_model import ModelResult, ModelServiceError
@@ -49,11 +58,6 @@ class StubModel:
         if self.error:
             raise self.error
         return ModelResult(response_id='resp-test', model='test-meta', text=self.text)
-
-
-def grounded_text(faq_id):
-    return ('{"answer": "A verified reply.", "citations": [{"faq_id": "%s", "version": 1, '
-            '"quote": "%s"}], "confidence": "high"}') % (faq_id, ANSWER)
 
 
 @pytest.fixture
@@ -82,7 +86,7 @@ def faq(b):
                                           question=QUESTION, answer=ANSWER))['record']
 
 
-def cleanup_committed(prefix, cid, faq_id, lead_id, property_ids=()):
+def cleanup_committed(prefix, cid, faq_id, lead_id, property_ids=(), extra_faq_ids=()):
     with connect(Settings()) as conn:
         ids = [row[0] for row in conn.execute('SELECT id FROM soloestate.conversation_messages WHERE conversation_id=%s',
                                               (cid,)).fetchall()]
@@ -91,9 +95,11 @@ def cleanup_committed(prefix, cid, faq_id, lead_id, property_ids=()):
         conn.execute('DELETE FROM soloestate.lead_activities WHERE lead_id=%s', (lead_id,))
         conn.execute('DELETE FROM soloestate.crm_operations WHERE request_key LIKE %s', (prefix + ':%',))
         for message_id in ids:
-            conn.execute('DELETE FROM soloestate.crm_operations WHERE request_key=%s', (f'chat:draft:{message_id}',))
-        conn.execute('DELETE FROM soloestate.faq_versions WHERE faq_id=%s', (faq_id,))
-        conn.execute('DELETE FROM soloestate.faqs WHERE id=%s', (faq_id,))
+            conn.execute('DELETE FROM soloestate.crm_operations WHERE request_key=%s', (f'channel:reply:{message_id}',))
+            conn.execute('DELETE FROM soloestate.crm_operations WHERE request_key=%s', (f'channel:escalate:{message_id}',))
+        for extra_id in [faq_id, *extra_faq_ids]:
+            conn.execute('DELETE FROM soloestate.faq_versions WHERE faq_id=%s', (extra_id,))
+            conn.execute('DELETE FROM soloestate.faqs WHERE id=%s', (extra_id,))
         for property_id in property_ids:
             conn.execute('DELETE FROM soloestate.properties WHERE id=%s', (property_id,))
         conn.execute('DELETE FROM soloestate.leads WHERE id=%s', (lead_id,))
@@ -105,7 +111,29 @@ EMPTY = '{"answer": "x", "citations": [], "confidence": "low"}'
 def says(b, opened, body='Is there a buyer fee?', model=None, **kw):
     base = dict(request_key=b['key'](), expected_version=opened['conversation']['version'], body=body)
     return asyncio.run(send(b['crm'], opened['conversation']['id'],
-                            s.ChatSend(**{**base, **kw}), model or StubModel(EMPTY)))
+                            s.ChatSend(**{**base, **kw}), model or StubModel('not json')))
+
+
+def _tout(category, segments, **extra):
+    return json.dumps(dict(catalog_version=CATALOG_VERSION, category=category, segments=segments, **extra))
+
+
+def _faq_reply_text(conn, cid, body):
+    """Valid engine faq turn text quoting the live retrieval for body."""
+    from psycopg.rows import dict_row
+    with conn.cursor(row_factory=dict_row) as cur:
+        convo = cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (cid,)).fetchone()
+        lead = cur.execute('SELECT * FROM soloestate.leads WHERE id=%s', (convo['lead_id'],)).fetchone()
+        policy = cur.execute("SELECT * FROM soloestate.business_policies WHERE id='default'").fetchone()
+        now = cur.execute('SELECT clock_timestamp() AS now').fetchone()['now']
+        registry = respond.build_registry(cur, convo, lead, body, dict(policy), now)
+    ref = next(ref for ref, fact in registry.items() if fact['ftype'] == 'faq_quotes')
+    return _tout('faq', [dict(phrase_id='FAQ_ANSWER', args={'quotes': ref})])
+
+
+def _clarify_text():
+    """Valid no-ref engine turn text; clarification is always supportable."""
+    return _tout('clarification', [dict(question_id='Q_CLARIFY', args={})])
 
 
 def test_start_opens_isolated_lead_conversation_and_token(chat):
@@ -206,12 +234,12 @@ def test_send_returns_grounded_reply_with_pinned_citations(chat):
     b = chat
     opened = begin(b)
     record = faq(b)
-    stub = StubModel(grounded_text(record['id']))
+    stub = StubModel(_faq_reply_text(b['conn'], opened['conversation']['id'], 'Is there a buyer fee?'))
     result = says(b, opened, model=stub)
     assert set(result) == {'message', 'reply', 'conversation'}
     assert set(result['reply']) == {'id', 'role', 'body', 'grounding', 'unsupported_reason', 'citations',
                                     'citations_superseded', 'confidence', 'supersedes_message_id', 'created_at'}
-    assert (result['reply']['grounding'], result['reply']['confidence']) == ('grounded', 'high')
+    assert result['reply']['grounding'] == 'grounded' and result['reply']['confidence'] is None
     assert result['reply']['citations'] == [{'faq_id': str(record['id']), 'version': 1, 'quote': ANSWER}]
     assert result['reply']['citations_superseded'] is False
     assert result['conversation']['status'] == 'open' and stub.calls == 1
@@ -220,14 +248,14 @@ def test_send_returns_grounded_reply_with_pinned_citations(chat):
 def test_unsupported_question_moves_to_pending_owner_and_blocks(chat):
     b = chat
     opened = begin(b)
-    result = says(b, opened, model=StubModel(EMPTY))
-    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', 'missing_citations')
-    assert result['reply']['body'] == FIXED_UNSUPPORTED_BODY
+    result = says(b, opened, model=StubModel('not json'))
+    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', 'invalid_response')
+    assert result['reply']['body'] == FALLBACK_TEXT
     assert result['conversation']['status'] == 'pending_owner'
     entry = b['conn'].execute('SELECT actor,reason FROM soloestate.lead_activities WHERE lead_id=%s',
                               (opened['lead']['id'],)).fetchall()
     assert ('visitor', 'Assistant answer needs owner review') in [tuple(row) for row in entry]
-    blocked = StubModel(grounded_text(faq(b)['id']))
+    blocked = StubModel('not json')
     with pytest.raises(CRMError, match='Owner review is pending'):
         says(b, opened, body='Another question?', expected_version=2, model=blocked)
     assert blocked.calls == 0
@@ -235,24 +263,25 @@ def test_unsupported_question_moves_to_pending_owner_and_blocks(chat):
                              (opened['conversation']['id'],)).fetchone()[0] == 2
 
 
-@pytest.mark.parametrize('failure,reason', [
-    (ModelServiceError('timeout', 'Simulated timeout'), 'inference_timeout'),
-    (None, 'invalid_response'),
+@pytest.mark.parametrize('failure', [
+    ModelServiceError('timeout', 'Simulated timeout'),
+    None,
 ])
-def test_model_timeout_and_malformed_use_unsupported_path(chat, failure, reason):
+def test_model_timeout_and_malformed_use_unsupported_path(chat, failure):
     b = chat
     opened = begin(b)
     stub = StubModel(error=failure) if failure else StubModel('not json')
     result = says(b, opened, model=stub)
-    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', reason)
+    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', 'invalid_response')
     assert result['conversation']['status'] == 'pending_owner'
+    assert stub.calls == 2
 
 
 def test_duplicate_reply_attempts_with_new_keys_create_no_second_reply(chat):
     b = chat
     opened = begin(b)
-    record = faq(b)
-    stub = StubModel(grounded_text(record['id']))
+    faq(b)
+    stub = StubModel(_faq_reply_text(b['conn'], opened['conversation']['id'], 'Is there a buyer fee?'))
     first = says(b, opened, model=stub)
     key = b['key']()
     again = asyncio.run(send(b['crm'], opened['conversation']['id'],
@@ -275,8 +304,8 @@ def test_replay_at_rate_limit_returns_stored_reply_without_inference(chat):
         append(b['crm'], cid, MessageAppend(request_key=b['key'](), expected_version=1,
                                             role='customer', body='Filler question?'), actor='visitor',
                rate_limit_per_hour=RATE_LIMIT_PER_HOUR)
-    record = faq(b)
-    stub = StubModel(grounded_text(record['id']))
+    faq(b)
+    stub = StubModel(_faq_reply_text(b['conn'], cid, 'Is there a buyer fee?'))
     key = b['key']()
     stored = asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
                                                         body='Is there a buyer fee?'), stub))
@@ -309,7 +338,7 @@ def test_concurrent_sends_serialize_with_one_reply_each(request):
 
         def attempt(index):
             gate.wait(timeout=30)
-            stub = StubModel(grounded_text(faq_id))
+            stub = StubModel(_clarify_text())
             return asyncio.run(send(CRM(), cid, s.ChatSend(request_key=keys[index], expected_version=1,
                                                            body=bodies[index]), stub))
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -337,7 +366,7 @@ def test_concurrent_same_key_sends_execute_once(request):
     try:
         gate = Barrier(2)
         shared = prefix + ':shared-send'
-        stub = StubModel(grounded_text(faq_id))
+        stub = StubModel(_clarify_text())
 
         def attempt(_):
             gate.wait(timeout=30)
@@ -357,13 +386,13 @@ def test_concurrent_same_key_sends_execute_once(request):
 def test_crash_between_append_and_draft_resumes_exactly_one_reply(chat):
     b = chat
     opened = begin(b)
-    record = faq(b)
+    faq(b)
     key = b['key']()
     orphan = append(b['crm'], opened['conversation']['id'],
                     MessageAppend(request_key=key, expected_version=1, role='customer',
                                   body='Is there a buyer fee?'), actor='visitor',
                     rate_limit_per_hour=RATE_LIMIT_PER_HOUR)['record']
-    stub = StubModel(grounded_text(record['id']))
+    stub = StubModel(_faq_reply_text(b['conn'], opened['conversation']['id'], 'Is there a buyer fee?'))
     resumed = asyncio.run(send(b['crm'], opened['conversation']['id'],
                                s.ChatSend(request_key=key, expected_version=1, body='Is there a buyer fee?'), stub))
     assert resumed['message']['id'] == orphan['id']
@@ -458,9 +487,9 @@ def test_mixed_visitor_and_owner_thread_with_truthful_provenance(chat):
     opened = begin(b)
     cid = opened['conversation']['id']
     faq_key = b['key']()
-    record = faq_create(b['crm'], FaqCreate(request_key=faq_key, scope='business', question=QUESTION,
-                                            answer=ANSWER))['record']
-    says(b, opened, model=StubModel(grounded_text(record['id'])))
+    faq_create(b['crm'], FaqCreate(request_key=faq_key, scope='business', question=QUESTION,
+                                   answer=ANSWER))
+    says(b, opened, model=StubModel(_faq_reply_text(b['conn'], cid, 'Is there a buyer fee?')))
     owner_key = b['key']()
     append(b['crm'], cid, MessageAppend(request_key=owner_key, expected_version=1, role='owner',
                                         body='Fictional owner follow-up.'))['record']
@@ -471,7 +500,7 @@ def test_mixed_visitor_and_owner_thread_with_truthful_provenance(chat):
         'SELECT request_key,actor FROM soloestate.crm_operations WHERE request_key LIKE %s', (b['prefix'] + ':%',)).fetchall()}
     assert actors[owner_key] == 'owner' and actors[faq_key] == 'owner'
     assert all(actor == 'visitor' for key, actor in actors.items() if key not in (owner_key, faq_key))
-    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'chat:draft:%' "
+    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'channel:reply:%' "
                              "AND actor<>'visitor'").fetchone()[0] == 0
 
 
@@ -486,13 +515,14 @@ def test_activity_failure_rolls_back_start_and_send_draft(chat, monkeypatch):
     with pytest.raises(RuntimeError, match='Simulated activity outage'):
         begin(b)
     assert b['conn'].execute('SELECT count(*) FROM soloestate.leads WHERE name=%s', (b['prefix'],)).fetchone()[0] == 1
-    failing = StubModel(EMPTY)
-    with pytest.raises(RuntimeError, match='Simulated activity outage'):
+    failing = StubModel('not json')
+    with pytest.raises(CRMError, match='Your message was saved') as exc:
         says(b, opened, model=failing)
+    assert exc.value.status == 503
     rows = b['conn'].execute('SELECT role FROM soloestate.conversation_messages WHERE conversation_id=%s ORDER BY created_at',
                              (opened['conversation']['id'],)).fetchall()
     assert [row[0] for row in rows] == ['customer']
-    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'chat:draft:%'",
+    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'channel:reply:%'",
                              ).fetchone()[0] == 0
 
 
@@ -500,8 +530,8 @@ def test_owner_http_chat_flow(chat, monkeypatch):
     import app.services.meta_model as meta_model
     b = chat
     opened = begin(b)
-    record = faq(b)
-    stub = StubModel(grounded_text(record['id']))
+    faq(b)
+    stub = StubModel(_faq_reply_text(b['conn'], opened['conversation']['id'], 'Is there a buyer fee?'))
     class Service:
         def __init__(self, *args, **kwargs):
             pass
@@ -547,6 +577,8 @@ def snapshot(b, cid, lead_id):
         conn.execute('SELECT version, status FROM soloestate.conversations WHERE id=%s', (cid,)).fetchone(),
         conn.execute('SELECT count(*) FROM soloestate.lead_activities WHERE lead_id=%s', (lead_id,)).fetchone()[0],
         conn.execute('SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE %s', (b['prefix'] + ':%',)).fetchone()[0],
+        conn.execute("SELECT count(*) FROM soloestate.crm_operations WHERE entity_id=%s AND action IN "
+                     "('channel:reply','channel:escalate')", (cid,)).fetchone()[0],
     )
 
 
@@ -559,8 +591,8 @@ def test_resolved_conversation_rejects_all_visitor_writes(chat):
     b = chat
     opened = begin(b)
     cid, lead_id = opened['conversation']['id'], opened['lead']['id']
-    record = faq(b)
-    stub = StubModel(grounded_text(record['id']))
+    faq(b)
+    stub = StubModel(_faq_reply_text(b['conn'], cid, 'Is there a buyer fee?'))
     send_key = b['key']()
     stored = asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=send_key, expected_version=1,
                                                         body='Is there a buyer fee?'), stub))
@@ -581,7 +613,8 @@ def test_resolved_conversation_rejects_all_visitor_writes(chat):
     assert snapshot(b, cid, lead_id) == before
     replayed = asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=send_key, expected_version=1,
                                                            body='Is there a buyer fee?'), stub))
-    assert replayed == stored and stub.calls == 1
+    assert replayed['message'] == stored['message'] and replayed['reply'] == stored['reply']
+    assert replayed['conversation']['status'] == 'resolved' and stub.calls == 1
     assert snapshot(b, cid, lead_id) == before
 
 
@@ -589,9 +622,9 @@ def test_pending_and_handoff_states_gate_sends_but_allow_requirements(chat):
     b = chat
     opened = begin(b)
     cid, lead_id = opened['conversation']['id'], opened['lead']['id']
-    says(b, opened, model=StubModel(EMPTY))
+    says(b, opened, model=StubModel('not json'))
     assert snapshot(b, cid, lead_id)[2] == (2, 'pending_owner')
-    fresh = StubModel(EMPTY)
+    fresh = StubModel('not json')
     with pytest.raises(CRMError, match='Owner review is pending'):
         says(b, opened, body='Still blocked?', expected_version=2, model=fresh)
     assert fresh.calls == 0
@@ -612,9 +645,9 @@ def test_pending_and_handoff_states_gate_sends_but_allow_requirements(chat):
         says(b, opened, body='Pending again?', expected_version=4, model=fresh)
     owner_review(b['crm'], cid, ReviewUpdate(request_key=b['key'](), expected_version=4,
                                               action='acknowledge', reason='Fictional owner acknowledge'))
-    record = faq(b)
+    faq(b)
     resumed = says(b, opened, body='Is there a buyer fee?', expected_version=5,
-                   model=StubModel(grounded_text(record['id'])))
+                   model=StubModel(_faq_reply_text(b['conn'], cid, 'Is there a buyer fee?')))
     assert resumed['reply']['grounding'] == 'grounded'
 
 
@@ -706,7 +739,7 @@ def test_state_change_between_append_and_draft_discloses_saved_message(chat):
                                                  body='Is there a buyer fee?'), actor='visitor',
                     rate_limit_per_hour=RATE_LIMIT_PER_HOUR)['record']
     resolve_conversation(b, cid, 1)
-    stub = StubModel(EMPTY)
+    stub = StubModel('not json')
     with pytest.raises(CRMError, match='Your message was saved') as exc:
         asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
                                                    body='Is there a buyer fee?'), stub))
@@ -714,7 +747,7 @@ def test_state_change_between_append_and_draft_discloses_saved_message(chat):
     assert stub.calls == 0
     rows = b['conn'].execute('SELECT id, role FROM soloestate.conversation_messages WHERE conversation_id=%s', (cid,)).fetchall()
     assert [(str(row[0]), row[1]) for row in rows] == [(orphan['id'], 'customer')]
-    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'chat:draft:%'",
+    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'channel:reply:%'",
                              ).fetchone()[0] == 0
 
 
@@ -736,7 +769,7 @@ def test_state_change_during_inference_discloses_saved_message(request):
             calls.append(prompt)
             entered.set()
             assert release.wait(timeout=60)
-            return ModelResult(response_id='resp-test', model='test-meta', text=EMPTY)
+            return ModelResult(response_id='resp-test', model='test-meta', text=_clarify_text())
 
     errors = []
 
@@ -831,29 +864,42 @@ def test_property_context_grounds_scoped_answers(chat):
                                                          locality=b['prefix'], price=150, bedrooms=2))['record']
     business = faq(b)
     record_a = property_faq(b, prop_a, 'This home charges no buyer fee and includes parking.')
-    property_faq(b, prop_b, 'The other home charges a buyer fee.')
+    record_b = property_faq(b, prop_b, 'The other home charges a buyer fee.')
     opened = {'conversation': {'id': cid, 'version': 1}}
-    business_first = says(b, opened, body=QUESTION, model=StubModel(grounded_text(business['id'])))
+    business_first = says(b, opened, body=QUESTION,
+                          model=StubModel(_faq_reply_text(b['conn'], cid, QUESTION)))
     assert business_first['reply']['grounding'] == 'grounded'
     assert business_first['reply']['citations'] == [{'faq_id': str(business['id']), 'version': 1, 'quote': ANSWER}]
     set_context(b['crm'], cid, s.ChatContext(request_key=b['key'](), expected_version=1, property_id=prop_a['id']))
     scoped = says(b, {'conversation': {'id': cid, 'version': 2}}, body=f'{b["prefix"]} fee terms?',
-                  model=StubModel(grounded_text(record_a['id']).replace(ANSWER, 'This home charges no buyer fee and includes parking.')))
+                  model=StubModel(_faq_reply_text(b['conn'], cid, f'{b["prefix"]} fee terms?')))
     assert scoped['reply']['grounding'] == 'grounded'
-    assert scoped['reply']['citations'] == [{'faq_id': str(record_a['id']), 'version': 1,
-                                             'quote': 'This home charges no buyer fee and includes parking.'}]
+    assert {'faq_id': str(record_a['id']), 'version': 1,
+            'quote': 'This home charges no buyer fee and includes parking.'} in scoped['reply']['citations']
+    assert all(item['faq_id'] != str(record_b['id']) for item in scoped['reply']['citations'])
 
 
 def test_other_property_faqs_cannot_be_cited(chat):
+    from psycopg.rows import dict_row
     b = chat
     cid, prop_a = matching_setup(b, 'A')
     prop_b = b['crm'].save('properties', PropertyCreate(request_key=b['key'](), title=b['prefix'] + '-B',
                                                          locality=b['prefix'], price=150, bedrooms=2))['record']
     record_b = property_faq(b, prop_b, 'The other home charges a buyer fee.')
+    property_faq(b, prop_a, 'This home charges no buyer fee.')
     set_context(b['crm'], cid, s.ChatContext(request_key=b['key'](), expected_version=1, property_id=prop_a['id']))
+    with b['conn'].cursor(row_factory=dict_row) as cur:
+        convo = cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (cid,)).fetchone()
+        lead = cur.execute('SELECT * FROM soloestate.leads WHERE id=%s', (convo['lead_id'],)).fetchone()
+        policy = cur.execute("SELECT * FROM soloestate.business_policies WHERE id='default'").fetchone()
+        now = cur.execute('SELECT clock_timestamp() AS now').fetchone()['now']
+        registry = respond.build_registry(cur, convo, lead, 'What is the fee?', dict(policy), now)
+    pins = [pin for fact in registry.values() if fact['ftype'] == 'faq_quotes' for pin in fact['pins']]
+    assert pins and all(pin['faq_id'] != str(record_b['id']) for pin in pins)
     result = says(b, {'conversation': {'id': cid, 'version': 2}}, body='What is the fee?',
-                  model=StubModel(grounded_text(record_b['id']).replace(ANSWER, 'The other home charges a buyer fee.')))
-    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', 'unauthorized_faq')
+                  model=StubModel(_tout('faq', [dict(phrase_id='FAQ_ANSWER', args={'quotes': 'f99'})])))
+    assert (result['reply']['grounding'], result['reply']['unsupported_reason']) == ('unsupported', 'invalid_response')
+    assert result['reply']['body'] == FALLBACK_TEXT
     assert result['conversation']['status'] == 'pending_owner'
 
 
@@ -866,11 +912,11 @@ def test_old_citations_stay_pinned_after_focus_change(chat):
     record_b = property_faq(b, prop_b, 'The other home charges a buyer fee.')
     set_context(b['crm'], cid, s.ChatContext(request_key=b['key'](), expected_version=1, property_id=prop_a['id']))
     first = says(b, {'conversation': {'id': cid, 'version': 2}}, body=f'{b["prefix"]} fee terms?',
-                 model=StubModel(grounded_text(record_a['id']).replace(ANSWER, 'This home charges no buyer fee and includes parking.')))
+                 model=StubModel(_faq_reply_text(b['conn'], cid, f'{b["prefix"]} fee terms?')))
     assert first['reply']['grounding'] == 'grounded'
     set_context(b['crm'], cid, s.ChatContext(request_key=b['key'](), expected_version=2, property_id=prop_b['id']))
     second = says(b, {'conversation': {'id': cid, 'version': 3}}, body='What is the fee?',
-                  model=StubModel(grounded_text(record_b['id']).replace(ANSWER, 'The other home charges a buyer fee.')))
+                  model=StubModel(_faq_reply_text(b['conn'], cid, 'What is the fee?')))
     assert second['reply']['grounding'] == 'grounded'
     thread = resume(b['crm'], cid)
     assert thread['conversation']['property_id'] == prop_b['id']
@@ -899,26 +945,33 @@ def test_context_change_during_inference_rejects_stale_scope(request):
                                                         price=150, bedrooms=2))['record']
         prop_b = crm.save('properties', PropertyCreate(request_key=key(), title=prefix + '-B', locality=prefix,
                                                         price=150, bedrooms=2))['record']
+        faq_a = faq_create(crm, FaqCreate(request_key=key(), scope='property', property_id=prop_a['id'],
+                                          question=prefix + ' fee terms?',
+                                          answer='Fictional old-focus quote ' + prefix))['record']
+        faq_b = faq_create(crm, FaqCreate(request_key=key(), scope='property', property_id=prop_b['id'],
+                                          question=prefix + ' other terms?',
+                                          answer='Fictional new-focus quote ' + prefix))['record']
         set_context(crm, cid, s.ChatContext(request_key=key(), expected_version=1, property_id=prop_a['id']))
+        quoted = _faq_reply_text(conn, cid, prefix + ' fee terms?')
     lead_id = opened['lead']['id']
     entered, release = Event(), Event()
     calls = []
+    outcomes = []
 
     class BlockingModel:
         async def generate(self, prompt):
             calls.append(prompt)
             entered.set()
             assert release.wait(timeout=60)
-            return ModelResult(response_id='resp-test', model='test-meta', text=EMPTY)
-
-    errors = []
+            return ModelResult(response_id='resp-test', model='test-meta', text=quoted)
 
     def attempt():
         try:
-            asyncio.run(send(CRM(), cid, s.ChatSend(request_key=prefix + ':midfocus', expected_version=2,
-                                                    body='Fee terms?'), BlockingModel()))
+            outcomes.append(asyncio.run(send(CRM(), cid, s.ChatSend(request_key=prefix + ':midfocus',
+                                                                    expected_version=2,
+                                                                    body=prefix + ' fee terms?'), BlockingModel())))
         except Exception as exc:
-            errors.append(exc)
+            outcomes.append(exc)
 
     worker = Thread(target=attempt)
     try:
@@ -928,18 +981,23 @@ def test_context_change_during_inference_rejects_stale_scope(request):
         assert focused['conversation']['property_id'] == prop_b['id']
         release.set()
         worker.join(timeout=60)
-        assert not worker.is_alive() and len(errors) == 1
-        assert isinstance(errors[0], CRMError) and errors[0].status == 409
-        assert 'Property focus changed' in str(errors[0]) and 'Your message was saved' in str(errors[0])
+        assert not worker.is_alive() and len(outcomes) == 1 and not isinstance(outcomes[0], Exception)
+        assert (outcomes[0]['reply']['grounding'], outcomes[0]['reply']['unsupported_reason']) == ('unsupported', 'invalid_response')
+        assert outcomes[0]['reply']['body'] == FALLBACK_TEXT
+        assert outcomes[0]['conversation']['status'] == 'pending_owner'
         assert len(calls) == 1
         with connect(Settings()) as conn:
             rows = conn.execute('SELECT role, count(*) FROM soloestate.conversation_messages WHERE conversation_id=%s '
                                 'GROUP BY role', (cid,)).fetchall()
-            assert sorted((row[0], row[1]) for row in rows) == [('customer', 1)]
+            assert sorted((row[0], row[1]) for row in rows) == [('assistant', 1), ('customer', 1)]
+            cited = conn.execute('SELECT citations FROM soloestate.conversation_messages WHERE conversation_id=%s '
+                                 "AND role='assistant'", (cid,)).fetchone()[0]
+            assert all(item.get('faq_id') != str(faq_a['id']) for item in cited)
     finally:
         release.set()
         worker.join(timeout=30)
-        cleanup_committed(prefix, cid, uuid4(), lead_id, [prop_a['id'], prop_b['id']])
+        cleanup_committed(prefix, cid, faq_a['id'], lead_id,
+                          [prop_a['id'], prop_b['id']], [faq_b['id']])
 
 
 def test_draft_claim_holds_concurrent_retry_without_inference(request):
@@ -958,10 +1016,10 @@ def test_draft_claim_holds_concurrent_retry_without_inference(request):
     send_key = prefix + ':claimed-send'
     message = append(CRM(), cid, MessageAppend(request_key=send_key, expected_version=1, role='customer',
                                                body='Is there a buyer fee?'), actor='visitor')['record']
-    draft_key = f"chat:draft:{message['id']}"
-    stub = StubModel(grounded_text(faq_id))
+    reply_key = f"channel:reply:{message['id']}"
+    stub = StubModel(_clarify_text())
     holder = connect(Settings())
-    holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+    holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
     holder.commit()
     errors, done = [], Event()
 
@@ -981,7 +1039,7 @@ def test_draft_claim_holds_concurrent_retry_without_inference(request):
         while stub.calls == 0 and clock.monotonic() < deadline and not done.is_set():
             clock.sleep(0.1)
         assert stub.calls == 0 and not done.is_set()
-        holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+        holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
         holder.commit()
         assert done.wait(timeout=60)
         worker.join(timeout=30)
@@ -1000,19 +1058,19 @@ def test_claimant_disconnect_releases_claim_for_recovery(chat):
     b = chat
     opened = begin(b)
     cid = opened['conversation']['id']
-    record = faq(b)
+    faq(b)
     key = b['key']()
     message = append(b['crm'], cid, MessageAppend(request_key=key, expected_version=1, role='customer',
                                                   body='Is there a buyer fee?'), actor='visitor')['record']
-    draft_key = f"chat:draft:{message['id']}"
+    reply_key = f"channel:reply:{message['id']}"
     with connect(Settings()) as doomed:
         assert doomed.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))',
-                              ('draft-claim:' + draft_key,)).fetchone()[0] is not False
+                              ('turn-claim:' + reply_key,)).fetchone()[0] is not False
     with connect(Settings()) as probe:
         assert probe.execute('SELECT pg_try_advisory_lock(hashtextextended(%s, 0))',
-                             ('draft-claim:' + draft_key,)).fetchone()[0] is True
-        probe.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
-    stub = StubModel(grounded_text(record['id']))
+                             ('turn-claim:' + reply_key,)).fetchone()[0] is True
+        probe.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
+    stub = StubModel(_faq_reply_text(b['conn'], cid, 'Is there a buyer fee?'))
     started = clock.monotonic()
     result = asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
                                                         body='Is there a buyer fee?'), stub))
@@ -1037,10 +1095,11 @@ def test_claim_timeout_replays_or_rejects_without_inference(request, monkeypatch
     send_key = prefix + ':timeout-send'
     message = append(CRM(), cid, MessageAppend(request_key=send_key, expected_version=1, role='customer',
                                                body='Is there a buyer fee?'), actor='visitor')['record']
-    draft_key = f"chat:draft:{message['id']}"
-    stub = StubModel(grounded_text(faq_id))
+    reply_key = f"channel:reply:{message['id']}"
+    with connect(Settings()) as _discover:
+        stub = StubModel(_faq_reply_text(_discover, cid, 'Is there a buyer fee?'))
     holder = connect(Settings())
-    holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+    holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
     holder.commit()
     try:
         with pytest.raises(CRMError) as exc:
@@ -1052,13 +1111,13 @@ def test_claim_timeout_replays_or_rejects_without_inference(request, monkeypatch
         assert stub.calls == 0
         with connect(Settings()) as conn:
             assert conn.execute('SELECT count(*) FROM soloestate.crm_operations WHERE request_key=%s',
-                                (draft_key,)).fetchone()[0] == 0
+                                (reply_key,)).fetchone()[0] == 0
             assert conn.execute("SELECT count(*) FROM soloestate.conversation_messages WHERE conversation_id=%s AND role='assistant'",
                                 (cid,)).fetchone()[0] == 0
         with connect(Settings()) as probe:
             assert probe.execute('SELECT pg_try_advisory_lock(hashtextextended(%s, 0))',
-                                 ('draft-claim:' + draft_key,)).fetchone()[0] is False
-        holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+                                 ('turn-claim:' + reply_key,)).fetchone()[0] is False
+        holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
         holder.commit()
         completed = asyncio.run(send(CRM(), cid, s.ChatSend(request_key=send_key, expected_version=1,
                                                              body='Is there a buyer fee?'), stub))
@@ -1066,18 +1125,18 @@ def test_claim_timeout_replays_or_rejects_without_inference(request, monkeypatch
         with pytest.raises(CRMError, match='Request key already belongs to a different operation'):
             asyncio.run(send(CRM(), cid, s.ChatSend(request_key=send_key, expected_version=1,
                                                     body='Changed body'), stub))
-        holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+        holder.execute('SELECT pg_advisory_lock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
         holder.commit()
         try:
             replayed = asyncio.run(send(CRM(), cid, s.ChatSend(request_key=send_key, expected_version=1,
                                                                 body='Is there a buyer fee?'), stub))
             assert replayed == completed and stub.calls == 1
             with pytest.raises(CRMError, match='Request key already belongs to a different operation'):
-                asyncio.run(owner_draft(CRM(), cid, DraftRequest(request_key=draft_key, expected_version=99,
+                asyncio.run(owner_draft(CRM(), cid, DraftRequest(request_key=reply_key, expected_version=99,
                                                                  message_id=message['id']), stub))
             assert stub.calls == 1
         finally:
-            holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('draft-claim:' + draft_key,))
+            holder.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
             holder.commit()
         with connect(Settings()) as conn:
             rows = conn.execute('SELECT role, count(*) FROM soloestate.conversation_messages WHERE conversation_id=%s '
@@ -1092,7 +1151,8 @@ def test_claimant_failure_recovers_with_exactly_one_reply(chat):
     b = chat
     opened = begin(b)
     cid = opened['conversation']['id']
-    record = faq(b)
+    faq(b)
+    quoted = _faq_reply_text(b['conn'], cid, 'Is there a buyer fee?')
 
     class FlakyModel:
         def __init__(self):
@@ -1102,20 +1162,20 @@ def test_claimant_failure_recovers_with_exactly_one_reply(chat):
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError('Simulated claimant crash')
-            return ModelResult(response_id='resp-test', model='test-meta', text=grounded_text(record['id']))
+            return ModelResult(response_id='resp-test', model='test-meta', text=quoted)
 
     stub = FlakyModel()
     key = b['key']()
-    with pytest.raises(RuntimeError, match='Simulated claimant crash'):
-        asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
-                                                   body='Is there a buyer fee?'), stub))
     result = asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
                                                         body='Is there a buyer fee?'), stub))
     assert result['reply']['grounding'] == 'grounded' and stub.calls == 2
+    assert asyncio.run(send(b['crm'], cid, s.ChatSend(request_key=key, expected_version=1,
+                                                      body='Is there a buyer fee?'), stub)) == result
+    assert stub.calls == 2
     rows = b['conn'].execute('SELECT role, count(*) FROM soloestate.conversation_messages WHERE conversation_id=%s '
                              'GROUP BY role', (cid,)).fetchall()
     assert sorted((row[0], row[1]) for row in rows) == [('assistant', 1), ('customer', 1)]
-    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'chat:draft:%'",
+    assert b['conn'].execute("SELECT count(*) FROM soloestate.crm_operations WHERE request_key LIKE 'channel:reply:%'",
                              ).fetchone()[0] == 1
 
 

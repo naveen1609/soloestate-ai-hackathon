@@ -9,6 +9,38 @@ def cooldown_ok(open_attempts, acked_in_window):
     return open_attempts == 0 and acked_in_window == 0
 
 
+def lead_delivery_counts(cur, lead_id, *, window_hours, exclude_outbox_id=None):
+    """Open attempts + in-window acknowledged sends for one lead, all channels.
+
+    Implements the §11 lead-scoped cooldown: open attempts (staged/submitting/
+    unknown) on any of the lead's outbox rows, plus acknowledged sends whose
+    ack instant falls in the trailing window. Acknowledgement without a
+    provider-ack instant (owner-resolved-sent, late-receipt advance) falls back
+    to the attempt creation instant, which bounds the actual submit within the
+    lease/validity timescale. exclude_outbox_id keeps a row from blocking
+    itself. Callers must hold the lead FOR UPDATE lock so concurrent stagers
+    serialize and the runner-up observes the winner's committed attempt.
+    """
+    from app.crm import scalar
+    now = scalar(cur.execute('SELECT clock_timestamp() AS now').fetchone())
+    filt, params = '', [lead_id]
+    if exclude_outbox_id is not None:
+        filt = ' AND o.id<>%s'
+        params.append(exclude_outbox_id)
+    open_attempts = scalar(cur.execute(
+        """SELECT count(*) FROM soloestate.delivery_attempts a
+           JOIN soloestate.delivery_outbox o ON o.id=a.outbox_id
+           WHERE o.lead_id=%s""" + filt + """ AND a.status IN ('staged','submitting','unknown')""",
+        params).fetchone())
+    acked_in_window = scalar(cur.execute(
+        """SELECT count(*) FROM soloestate.delivery_attempts a
+           JOIN soloestate.delivery_outbox o ON o.id=a.outbox_id
+           WHERE o.lead_id=%s""" + filt + """ AND a.status='acknowledged'
+           AND coalesce(a.submitted_at,a.created_at) > %s - make_interval(hours=>%s)""",
+        (*params, now, window_hours)).fetchone())
+    return {'open_attempts': open_attempts, 'acked_in_window': acked_in_window}
+
+
 def reserve_cap(cur, day, channel, cap):
     """Atomically consume one unit of the (day, channel) cap. Returns True iff reserved."""
     row = cur.execute(
@@ -104,9 +136,20 @@ def _thread_fresh(cur, channel, link, conversation_id, now):
 
 
 def authorize_delivery(cur, *, channel, destination, link, lead, category, day, cap,
-                       conversation_id=None, policy=None, open_attempts=0, acked_in_window=0):
+                       conversation_id=None, policy=None, open_attempts=0, acked_in_window=0,
+                       reservation=None):
     """Delivery authorization evaluator (read-only; D2 calls it under locks at
     staging and at the submitting transition). Returns authorized/reasons/basis.
+
+    Cap accounting has two modes. reservation=None is acquisition: the caller
+    is about to consume a new unit, so day/channel headroom is required.
+    reservation={'reserved': bool, 'day': date} is validation of an already
+    held unit (transition/restage): ownership and ledger presence are verified
+    instead, so a held unit never blocks its own submission and stays valid
+    across midnight and cap changes on its recorded day. policy=None skips the
+    enablement gate (D1 callers); a passed row enforces enabled plus category
+    membership ('policy_disabled' / 'category_not_allowed'). Callers pass the
+    live row; a missing row must fail closed before calling.
 
     Identity and thread bindings are re-read from persisted rows here: the
     caller supplies the claimed link row, lead row and thread id, and this
@@ -168,11 +211,20 @@ def authorize_delivery(cur, *, channel, destination, link, lead, category, day, 
         reasons.append('permission_required')
     if category not in ROUTINE_CATEGORIES:
         reasons.append('sensitive_category')
-    if policy is not None and not policy['enabled']:
-        reasons.append('policy_disabled')
-    used = cur.execute('SELECT used FROM soloestate.delivery_caps WHERE day=%s AND channel=%s', (day, channel)).fetchone()
-    if used is not None and scalar(used) >= cap:
-        reasons.append('cap_exhausted')
+    if policy is not None:
+        if not policy['enabled']:
+            reasons.append('policy_disabled')
+        elif category not in (policy.get('categories') or []):
+            reasons.append('category_not_allowed')
+    if reservation is None:
+        used = cur.execute('SELECT used FROM soloestate.delivery_caps WHERE day=%s AND channel=%s', (day, channel)).fetchone()
+        if used is not None and scalar(used) >= cap:
+            reasons.append('cap_exhausted')
+    elif not reservation.get('reserved') or reservation.get('day') is None:
+        reasons.append('reservation_invalid')
+    elif cur.execute('SELECT 1 FROM soloestate.delivery_caps WHERE day=%s AND channel=%s',
+                     (reservation['day'], channel)).fetchone() is None:
+        reasons.append('reservation_invalid')
     if not cooldown_ok(open_attempts, acked_in_window):
         reasons.append('cooldown_active')
     return {'authorized': not reasons, 'reasons': reasons, 'basis': basis}

@@ -46,3 +46,10 @@ class Settings(BaseSettings):
     agent_timeout_seconds: float = Field(default=180, ge=10, le=600, allow_inf_nan=False)
     owner_api_token: SecretStr | None = None
     visitor_token_secret: SecretStr | None = None
+    whatsapp_verify_token: SecretStr | None = None
+    whatsapp_app_secret: SecretStr | None = None
+    whatsapp_access_token: SecretStr | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_business_account_id: str | None = None
+    whatsapp_api_base: str = 'https://graph.facebook.com/v24.0'
+    whatsapp_mock_provider: bool = False

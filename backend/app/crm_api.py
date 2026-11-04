@@ -381,3 +381,33 @@ def create_automation_policy(body:s.AutomationPolicyCreate,crm:CRM=Depends(servi
 def edit_automation_policy(identifier:UUID,body:s.AutomationPolicyUpdate,crm:CRM=Depends(service)):
     from app.policies import update_automation_policy
     return update_automation_policy(crm,identifier,body)
+
+
+@router.get('/immediate-reply-policy')
+def reply_policy(crm:CRM=Depends(service)):
+    from app.policies import get_reply_policy
+    return get_reply_policy(crm)
+
+
+@router.patch('/immediate-reply-policy')
+def edit_reply_policy(body:s.ReplyPolicyUpdate,crm:CRM=Depends(service)):
+    from app.policies import update_reply_policy
+    return update_reply_policy(crm,body)
+
+
+@router.get('/outbox')
+def outbox(status:Literal['queued','staged','submitting','sent','delivered','read','failed','unknown','dead','skipped']|None=None,lead_id:UUID|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),crm:CRM=Depends(service)):
+    from app.dispatch import listing
+    return listing(crm,status=status,lead_id=lead_id,page=page,page_size=page_size)
+
+
+@router.post('/outbox/{identifier}/resolve')
+def resolve_outbox(identifier:UUID,body:s.OutboxResolve,crm:CRM=Depends(service)):
+    from app.dispatch import resolve_unknown
+    return resolve_unknown(crm,identifier,body)
+
+
+@router.post('/outbox/{identifier}/requeue')
+def requeue_outbox(identifier:UUID,body:s.OutboxRequeue,crm:CRM=Depends(service)):
+    from app.dispatch import requeue
+    return requeue(crm,identifier,body)

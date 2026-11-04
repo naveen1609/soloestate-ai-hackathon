@@ -71,6 +71,19 @@ it('shows unsupported answers with reason and blocks drafting while pending',asy
  expect(screen.getByRole('button',{name:'Draft answer'})).toBeDisabled();
 });
 
+it('shows validated autonomous replies without citations',async()=>{
+ const user=userEvent.setup();
+ const validated={...grounded,id:'80000000-0000-4000-8000-000000000006',body:'Got it. Let me look into that for you.',grounding:'validated',citations:[],confidence:null};
+ vi.stubGlobal('fetch',stub((url)=>{
+  if(url.includes('/api/owner/crm/conversations?lead_id='))return {items:[convo],total:1,page:1,page_size:20};
+  if(url.includes('/api/owner/crm/properties'))return emptyList;
+  return {record:convo,messages:[customer,validated],truncated:false,drafting_blocked:null};}));
+ render(<ConversationPanel leadId={LEAD}/>);
+ await user.click(await screen.findByRole('button',{name:/open · none/}));
+ expect(await screen.findByText('assistant · Validated auto-reply')).toBeVisible();
+ expect(screen.getByText('Got it. Let me look into that for you.')).toBeVisible();
+});
+
 it('requests and resolves handoff with an owner reason',async()=>{
  const user=userEvent.setup();
  const calls:string[]=[];

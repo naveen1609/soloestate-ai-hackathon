@@ -1198,6 +1198,13 @@ def test_pol02_automation_policy_categories_and_enable_gate(d1):
 def test_pol03_cap_reservation_is_atomic_and_refundable(d1):
     today = date.today()
     with d1['conn'].cursor(row_factory=dict_row) as cur:
+        # Scoped isolation: a committed run may leave an empty same-day caps
+        # row; clear it inside this rollback transaction so cap-2 math is exact.
+        # A non-empty row is a real leak and must fail loudly instead.
+        existing = cur.execute('SELECT used FROM soloestate.delivery_caps WHERE day=%s AND channel=%s',
+                               (today, 'whatsapp')).fetchone()
+        assert existing is None or existing['used'] == 0, existing
+        cur.execute('DELETE FROM soloestate.delivery_caps WHERE day=%s AND channel=%s', (today, 'whatsapp'))
         assert reserve_cap(cur, today, 'whatsapp', 2) is True
         assert reserve_cap(cur, today, 'whatsapp', 2) is True
         assert reserve_cap(cur, today, 'whatsapp', 2) is False

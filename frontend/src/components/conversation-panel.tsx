@@ -47,7 +47,7 @@ function ConversationDetail({id,onChanged}:{id:string;onChanged:()=>void}){
  <p role="status">Status: {data.record.status} · Handoff: {data.record.handoff_state}</p>
  {blocked&&<p role="alert">Drafting blocked: {blocked.replaceAll('_',' ')}.</p>}
  {data.truncated&&<p className="subtle">Showing the latest 100 messages.</p>}
- {data.messages.map(row=><article className="crm-row" key={row.id}><p>{row.role}{row.role==='assistant'&&(row.grounding==='grounded'?' · Grounded':row.grounding==='unsupported'?' · Unsupported answer':'')}</p>
+ {data.messages.map(row=><article className="crm-row" key={row.id}><p>{row.role}{row.role==='assistant'&&(row.grounding==='grounded'?' · Grounded':row.grounding==='unsupported'?' · Unsupported answer':row.grounding==='validated'?' · Validated auto-reply':'')}</p>
   <p>{row.body}</p>
   {row.role==='assistant'&&row.grounding==='grounded'&&<><p className="subtle">Model-reported confidence: {String(row.confidence)}</p>
    <ul>{row.citations.map(item=><li key={item.faq_id+'v'+item.version}><Link href={'/faqs/'+item.faq_id}>FAQ v{item.version}</Link>: {item.quote}</li>)}</ul>

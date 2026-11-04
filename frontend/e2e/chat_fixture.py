@@ -32,11 +32,17 @@ def cleanup(payload):
         leads = [row[0] for row in conn.execute('SELECT id FROM soloestate.leads WHERE name=%s', (data['prefix'],)).fetchall()]
         convos = [row[0] for row in conn.execute('SELECT id FROM soloestate.conversations WHERE lead_id=ANY(%s::uuid[])', (leads,)).fetchall()] if leads else []
         messages = [row[0] for row in conn.execute('SELECT id FROM soloestate.conversation_messages WHERE conversation_id=ANY(%s::uuid[])', (convos,)).fetchall()] if convos else []
+        requests = [row[0] for row in conn.execute('SELECT id FROM soloestate.booking_requests WHERE conversation_id=ANY(%s::uuid[])', (convos,)).fetchall()] if convos else []
+        booked = conn.execute('SELECT count(*) FROM soloestate.bookings WHERE lead_id=ANY(%s::uuid[])', (leads,)).fetchone()[0] if leads else 0
+        if booked:
+            raise RuntimeError('chat journey must not commit bookings; found %d' % booked)
+        conn.execute('DELETE FROM soloestate.conversation_summaries WHERE conversation_id=ANY(%s::uuid[])', (convos,))
         conn.execute('DELETE FROM soloestate.conversation_messages WHERE id=ANY(%s::uuid[])', (messages,))
         conn.execute('DELETE FROM soloestate.conversations WHERE id=ANY(%s::uuid[])', (convos,))
         conn.execute('DELETE FROM soloestate.lead_activities WHERE lead_id=ANY(%s::uuid[])', (leads,))
-        ents = [str(i) for i in leads + convos + messages] + data['slot_ids'] + data['faq_ids'] + data['property_ids']
+        ents = [str(i) for i in leads + convos + messages + requests] + data['slot_ids'] + data['faq_ids'] + data['property_ids']
         conn.execute('DELETE FROM soloestate.crm_operations WHERE entity_id=ANY(%s::uuid[])', (ents,))
+        conn.execute('DELETE FROM soloestate.booking_requests WHERE id=ANY(%s::uuid[])', (requests,))
         conn.execute('DELETE FROM soloestate.faq_versions WHERE faq_id=ANY(%s::uuid[])', (data['faq_ids'],))
         conn.execute('DELETE FROM soloestate.faqs WHERE id=ANY(%s::uuid[])', (data['faq_ids'],))
         conn.execute('DELETE FROM soloestate.properties WHERE id=ANY(%s::uuid[])', (data['property_ids'],))

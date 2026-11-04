@@ -11,6 +11,7 @@ from app.services.meta_model import ModelServiceError
 from app.dashboard_api import router as dashboard_router
 from app.crm_api import router as crm_router
 from app.chat_api import router as chat_router
+from app.whatsapp_api import router as whatsapp_router
 from app.crm import CRMError
 
 
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(crm_router)
     app.include_router(chat_router)
+    app.include_router(whatsapp_router)
 
     @app.exception_handler(CRMError)
     async def crm_error(request,exc):

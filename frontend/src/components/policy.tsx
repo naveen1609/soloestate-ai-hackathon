@@ -2,7 +2,7 @@
 import {FormEvent,useCallback,useEffect,useRef,useState} from 'react';
 import CrmShell from './crm-shell';
 import {crmApi,ListSchema,Row,message,useMutation} from '../lib/crm';
-import {DAY_NAMES,LINK_STATUSES,SingletonSchema,SuppressionListSchema,SuppressionResultSchema} from '../lib/policy';
+import {DAY_NAMES,LINK_STATUSES,ROUTINE_REPLY_CATEGORIES,ReplyPolicySchema,SingletonSchema,SuppressionListSchema,SuppressionResultSchema} from '../lib/policy';
 import {text} from '../lib/types';
 
 function useLoad<T>(load:()=>Promise<T>){
@@ -79,6 +79,27 @@ function AutomationControls(){
  <button className="button button-light" disabled={action.busy||!reason.trim()} onClick={()=>void submit(false)}>Lift the stop</button></div></section>;
 }
 
+type ReplyPolicyRecord={id:string;enabled:boolean;categories:string[];version:number};
+function ReplyPolicyFields({data,reload}:{data:ReplyPolicyRecord;reload:()=>Promise<void>}){
+ const action=useMutation('reply-policy:update',SingletonSchema);
+ const [enabled,setEnabled]=useState(data.enabled);const [cats,setCats]=useState<string[]>(data.categories);const [reason,setReason]=useState('');
+ async function submit(e:FormEvent){e.preventDefault();const record=await action.execute('immediate-reply-policy',{expected_version:data.version,enabled,categories:cats,reason},'PATCH');if(record){setReason('');await reload();}}
+ return <form className="panel crm-section crm-form" onSubmit={e=>void submit(e)}><h2>Immediate replies</h2><p className="subtle">Reply policy v{text(data.version)} · {data.enabled?'enabled':'disabled'} · {data.categories.length} categories permitted</p>
+ <fieldset disabled={action.busy||action.pending}>
+ <label className="crm-check"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/>Enable automatic replies</label>
+ <fieldset><legend>Permitted routine categories</legend><div className="crm-filters">{ROUTINE_REPLY_CATEGORIES.map(c=><label key={c} className="crm-check"><input type="checkbox" checked={cats.includes(c)} onChange={e=>setCats(s=>e.target.checked?[...s,c]:s.filter(x=>x!==c))}/>{c}</label>)}</div></fieldset>
+ <label>Reply change reason<input required maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}/></label></fieldset>
+ {action.error&&<p role="alert" className="notice notice-error">{action.error}</p>}<button className="button button-primary" disabled={action.busy}>{action.busy?'Saving…':action.pending?'Retry saved reply policy':'Save reply policy'}</button></form>;
+}
+
+function ReplyPolicy(){
+ const load=useCallback(async()=>ReplyPolicySchema.parse(await crmApi('immediate-reply-policy')).record as ReplyPolicyRecord,[]);
+ const {data,error,loading,reload}=useLoad(load);
+ if(loading)return <p role="status">Loading reply policy…</p>;
+ if(error||!data)return <p role="alert" className="notice notice-error">{error||'Reply policy unavailable.'}</p>;
+ return <ReplyPolicyFields key={String(data.version)} data={data} reload={reload}/>;
+}
+
 function AutomationPolicies(){
  const load=useCallback(async()=>ListSchema.parse(await crmApi('automation-policies')).items,[]);
  const {data,error,loading,reload}=useLoad(load);
@@ -131,5 +152,5 @@ function IdentityLinks(){
 
 export default function Policy(){
  return <CrmShell><div className="crm-heading"><div><p className="eyebrow">OWNER BUSINESS RULES</p><h1>Policy and scheduling</h1><p>Working hours, visit resources, automation limits and channel identities.</p></div></div>
- <PolicyForm/><Resources/><SlotGeneration/><AutomationControls/><AutomationPolicies/><SuppressionList/><IdentityLinks/></CrmShell>;
+ <PolicyForm/><Resources/><SlotGeneration/><AutomationControls/><ReplyPolicy/><AutomationPolicies/><SuppressionList/><IdentityLinks/></CrmShell>;
 }

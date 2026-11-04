@@ -1,4 +1,9 @@
-"""Website visitor chat on the shared conversation/lead services. Token-scoped, actor 'visitor'."""
+"""Website visitor chat on the shared conversation/lead services. Token-scoped, actor 'visitor'.
+
+Sends run the shared receptionist turn engine inline: website and WhatsApp
+reach identical validated business decisions from one engine, while website
+replies persist inline only and never touch the outbox or provider.
+"""
 import secrets
 from uuid import uuid4
 
@@ -74,28 +79,132 @@ def start(crm, request, settings=None):
             'messages': [], 'token': response['token']}
 
 
+_TURN_REFUSALS = {
+    'handoff_requested': 'Resolve the human handoff before drafting a response.',
+    'pending_owner': 'Owner review is pending. Acknowledge or resolve before drafting.',
+    'resolved': 'Reopen the conversation before drafting.',
+    'lead_archived': ('Restore the lead before drafting.', 422),
+    'sensitive_escalated': 'Owner review is pending. Acknowledge or resolve before drafting.',
+    'message_not_found': ('Message not found. Reload the chat to see its current state.', 404),
+}
+_SAVED_DISCLOSURE = ' Your message was saved; reload the chat to see its current state.'
+
+
 async def send(crm, identifier, request, model=None):
-    from app.conversation import append, draft
-    from app.crm_schemas import DraftRequest, MessageAppend
+    import asyncio
+    import time
+    from app.conversation import CLAIM_POLL_SECONDS, CLAIM_WAIT_SECONDS, append
+    from app.crm_schemas import MessageAppend
+    from app.receptionist import respond_turn
+    from psycopg.rows import dict_row
     appended = append(crm, identifier, MessageAppend(request_key=request.request_key, expected_version=request.expected_version,
                       role='customer', body=request.body, supersedes_message_id=None),
                       actor='visitor', rate_limit_per_hour=RATE_LIMIT_PER_HOUR, visitor_send=True)
     message = appended['record']
-    internal = DraftRequest(request_key=f"chat:draft:{message['id']}", expected_version=request.expected_version,
-                            message_id=message['id'])
-    try:
-        if model is None:
-            from app.config import Settings
-            from app.services.meta_model import MetaModelService
-            async with MetaModelService(Settings()) as live:
-                drafted = await draft(crm, identifier, internal, live, actor='visitor')
-        else:
-            drafted = await draft(crm, identifier, internal, model, actor='visitor')
-    except CRMError as exc:
-        # The customer message above is committed: never report a definitive failure that hides it.
-        raise CRMError(f'{exc} Your message was saved; reload the chat to see its current state.', exc.status) from None
-    return {'message': public_message(message), 'reply': public_message(drafted['record']),
-            'conversation': public_conversation(drafted['conversation'])}
+    reply_key = 'channel:reply:' + str(message['id'])
+    # Session-level claim on the message-bound turn key, mirroring the
+    # draft claim: concurrent same-key retries wait here, then replay the
+    # committed reply without inference. Inference never begins unless
+    # this caller owns the claim; on wait expiry the caller replays a
+    # completed row or fails retryably without touching rows or the
+    # claim. The claim session holds no row locks and no write
+    # transaction during the turn; it releases in the finally block.
+    outcome, turn_error, expired = None, None, False
+    with crm.connect() as claim:
+        deadline = time.monotonic() + CLAIM_WAIT_SECONDS
+        held = False
+        while not held and time.monotonic() < deadline:
+            held = claim.execute('SELECT pg_try_advisory_lock(hashtextextended(%s, 0))',
+                                 ('turn-claim:' + reply_key,)).fetchone()[0]
+            if not held:
+                await asyncio.sleep(CLAIM_POLL_SECONDS)
+        try:
+            if not held:
+                replayed = _replay_stored(crm, identifier, message, reply_key)
+                if replayed is None:
+                    expired = True
+                else:
+                    return replayed
+            else:
+                replayed = _replay_stored(crm, identifier, message, reply_key)
+                if replayed is not None:
+                    return replayed
+                try:
+                    outcome = await asyncio.to_thread(respond_turn, crm.connect, identifier,
+                                                      message['id'], model, 'visitor')
+                except CRMError as exc:
+                    turn_error = (f'{exc}' + _SAVED_DISCLOSURE, exc.status)
+                except Exception as exc:  # noqa: BLE001 - turn errors disclose the saved message, never crash the send
+                    turn_error = ('The reply failed (%s). Retry the same saved request; '
+                                  'no new result is confirmed.%s' % (type(exc).__name__, _SAVED_DISCLOSURE), 503)
+        finally:
+            if held:
+                claim.execute('SELECT pg_advisory_unlock(hashtextextended(%s, 0))', ('turn-claim:' + reply_key,))
+    # Outcomes are mapped outside the claim session: raising inside it
+    # would roll back the claim transaction, which shares the test
+    # rollback connection with the turn's committed writes.
+    if expired:
+        raise CRMError('Another reply is in progress for this message. Retry the same saved request; '
+                       'no new result is confirmed.' + _SAVED_DISCLOSURE, 503)
+    if turn_error is not None:
+        raise CRMError(*turn_error)
+    if not outcome.get('replied'):
+        raise _turn_refusal(outcome.get('reason'))
+    with crm.connect() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute('SELECT * FROM soloestate.conversation_messages WHERE id=%s',
+                              (outcome['message_id'],)).fetchone()
+            convo = cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (identifier,)).fetchone()
+    return {'message': public_message(message), 'reply': public_message(row),
+            'conversation': public_conversation(convo)}
+
+
+def _stored_turn_reply(crm, reply_key):
+    from psycopg.rows import dict_row
+    with crm.connect() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute('SELECT response FROM soloestate.crm_operations WHERE request_key=%s',
+                              (reply_key,)).fetchone()
+    if row is None:
+        return None
+    return dict(row['response'].get('reply', {}))
+
+
+def _replay_stored(crm, identifier, message, reply_key):
+    """Project a committed turn result, map stored refusals, or return None.
+
+    Runs before the engine so website replays bypass turn-time gates
+    exactly like the pre-adapter draft replay: the committed outcome is
+    already decided, so no new inference, writes, or gate evaluation
+    occur. The conversation is re-read live, so the projection reflects
+    current status rather than a stale snapshot.
+    """
+    stored = _stored_turn_reply(crm, reply_key)
+    if stored is None:
+        return None
+    if not stored.get('replied'):
+        raise _turn_refusal(stored.get('reason'))
+    return _project_turn(crm, identifier, message, stored)
+
+
+def _project_turn(crm, identifier, message, stored):
+    from psycopg.rows import dict_row
+    with crm.connect() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute('SELECT * FROM soloestate.conversation_messages WHERE id=%s',
+                              (stored['message_id'],)).fetchone()
+            convo = cur.execute('SELECT * FROM soloestate.conversations WHERE id=%s', (identifier,)).fetchone()
+    return {'message': public_message(message), 'reply': public_message(row),
+            'conversation': public_conversation(convo)}
+
+
+def _turn_refusal(reason):
+    mapped = _TURN_REFUSALS.get(reason, 'The reply was refused. Reload the chat to see its current state.')
+    if isinstance(mapped, tuple):
+        text, status = mapped
+    else:
+        text, status = mapped, 409
+    raise CRMError(text + _SAVED_DISCLOSURE, status)
 
 
 def resume(crm, identifier):
