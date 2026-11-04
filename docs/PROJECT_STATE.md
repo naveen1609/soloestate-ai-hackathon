@@ -1,5 +1,8 @@
 # SoloEstate AI — project state
 
+**Growth Engine-lite, sixth-audit remediation.** The main worktree has uncommitted changes to structured copy, review and export, migration compatibility, and media adapters. See the [current verification record](growth-engine-implementation-report.md#sixth-audit-remediation). Live provider execution remains unverified.
+
+
 **D2 status, 4 November 2026. CONDITIONAL PASS for local fictional-data demos with mocked WhatsApp delivery.** See [independent acceptance and limitations](phase-d2-verification.md#independent-d2-acceptance--4-november-2026). Earlier pending-review entries are historical. D2 is included in the owner-authorized local checkpoint containing this record. Resolve its hash through Git. D3 requires separate authorization.
 
 
